@@ -1,6 +1,8 @@
 pub(crate) const SOURCE_ID: &[u8] = b"obs_chzzk_extension_settings\0";
 pub(crate) const SOURCE_NAME: &[u8] = b"OBS Chzzk Extension Settings\0";
 pub(crate) const MENU_TITLE: &[u8] = b"OBS Chzzk Extension Settings...\0";
+pub(crate) const LIVE_DOCK_ID: &[u8] = b"obs_chzzk_live_editor_dock\0";
+pub(crate) const LIVE_DOCK_TITLE: &[u8] = b"CHZZK Live Editor\0";
 pub(crate) const SETTINGS_FILE_NAME: &str = "obs_chzzk_extension.json";
 
 pub(crate) const KEY_CHZZK_CLIENT_ID: &[u8] = b"chzzk_client_id\0";
