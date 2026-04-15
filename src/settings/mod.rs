@@ -130,6 +130,7 @@ struct LiveDockResponse {
     category_type: Option<String>,
     category_id: Option<String>,
     category_name: Option<String>,
+    poster_image_url: Option<String>,
     tags: Option<Vec<String>>,
     categories: Option<Vec<LiveDockCategoryEntry>>,
 }
@@ -186,6 +187,12 @@ fn response_json_ptr(response: LiveDockResponse) -> *mut c_char {
         payload.insert(
             "categoryName".to_string(),
             Value::String(sanitize_c_text(&category_name)),
+        );
+    }
+    if let Some(poster_image_url) = response.poster_image_url {
+        payload.insert(
+            "posterImageUrl".to_string(),
+            Value::String(sanitize_c_text(&poster_image_url)),
         );
     }
     if let Some(tags) = response.tags {
@@ -245,16 +252,102 @@ fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> 
         .fetch_live_settings(access_token)
         .map_err(|error| format!("Failed to fetch live setting: {}", error))?;
 
+    let live_title = live.live_title.unwrap_or_default();
+    let category_type = live.category_type.unwrap_or_default();
+    let category_id = live.category_id.unwrap_or_default();
+    let category_name = live.category_name.unwrap_or_default();
+    let tags = live.tags.unwrap_or_default();
+
+    let poster_image_url = resolve_current_category_thumbnail(
+        &settings,
+        &client,
+        &category_type,
+        &category_id,
+        &category_name,
+    );
+
     Ok(LiveDockResponse {
         ok: true,
         status: status.to_string(),
-        live_title: Some(live.live_title.unwrap_or_default()),
-        category_type: Some(live.category_type.unwrap_or_default()),
-        category_id: Some(live.category_id.unwrap_or_default()),
-        category_name: Some(live.category_name.unwrap_or_default()),
-        tags: Some(live.tags.unwrap_or_default()),
+        live_title: Some(live_title),
+        category_type: Some(category_type),
+        category_id: Some(category_id),
+        category_name: Some(category_name),
+        poster_image_url,
+        tags: Some(tags),
         categories: None,
     })
+}
+
+fn resolve_current_category_thumbnail(
+    settings: &PluginSettings,
+    client: &ChzzkClient,
+    category_type: &str,
+    category_id: &str,
+    category_name: &str,
+) -> Option<String> {
+    let category_id = category_id.trim();
+    if category_id.is_empty() {
+        return None;
+    }
+
+    let client_id = settings.chzzk_client_id.trim();
+    let client_secret = settings.chzzk_client_secret.trim();
+    if client_id.is_empty() || client_secret.is_empty() {
+        return None;
+    }
+
+    let query = if category_name.trim().is_empty() {
+        category_id
+    } else {
+        category_name.trim()
+    };
+
+    let category_type = category_type.trim();
+
+    let try_pick = |items: &[crate::chzzk::ChzzkCategory]| {
+        items
+            .iter()
+            .find(|item| {
+                item.category_id == category_id
+                    && (category_type.is_empty() || item.category_type == category_type)
+            })
+            .or_else(|| items.iter().find(|item| item.category_id == category_id))
+            .and_then(|item| item.poster_image_url.clone())
+    };
+
+    match client.search_categories(client_id, client_secret, query, Some(20)) {
+        Ok(items) => {
+            if let Some(url) = try_pick(&items) {
+                return Some(url);
+            }
+        }
+        Err(error) => {
+            warn(format!(
+                "Failed to resolve category thumbnail on load (query='{}'): {}",
+                query, error
+            ));
+            return None;
+        }
+    }
+
+    if query != category_id {
+        match client.search_categories(client_id, client_secret, category_id, Some(20)) {
+            Ok(items) => {
+                if let Some(url) = try_pick(&items) {
+                    return Some(url);
+                }
+            }
+            Err(error) => {
+                warn(format!(
+                    "Failed fallback category thumbnail lookup (category_id='{}'): {}",
+                    category_id, error
+                ));
+            }
+        }
+    }
+
+    None
 }
 
 fn search_category_response(query: &str) -> Result<LiveDockResponse, String> {
