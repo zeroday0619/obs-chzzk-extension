@@ -2,6 +2,10 @@
 [NAVER Chzzk](https://chzzk.naver.com) の OBS Studio 拡張機能
 
 [English](README.md) | [한국어](README.ko.md)
+
+## プレビュー
+![プレビュー](public/image/preview-all.png)
+
 ## 前提条件
 - (推奨 / 動作確認済み) OBS Studio - 32.1.1 以上
 - (推奨 / 動作確認済み) Rust コンパイラ - 1.94.1

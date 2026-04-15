@@ -2,6 +2,10 @@
 [NAVER Chzzk](https://chzzk.naver.com) OBS Studio 확장 프로그램
 
 [English](README.md) | [日本語](README.ja.md)
+
+## 미리보기
+![미리보기](public/image/preview-all.png)
+
 ## 사전 요구 사항
 - (권장 / 테스트 완료) OBS Studio - 32.1.1 이상
 - (권장 / 테스트 완료) Rust 컴파일러 - 1.94.1
