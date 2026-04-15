@@ -40,12 +40,12 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
         4. `Save Changes`를 클릭해 설정을 적용하고 `Application ID`를 확인합니다.
 3. 필요한 설정을 구성합니다.
 4. `Ok`를 클릭하여 설정을 적용합니다.
-5. `Docks` > `CHZZK Live Editor`에서 방송 제목/카테고리를 수정합니다.
+5. `Docks` > `CHZZK Live Editor`에서 방송 제목/카테고리/태그를 수정합니다.
 
 ## 기능
 ### 구현됨
 - Discord Rich Presence 연동
-- 라이브 스트림 정보 편집 (제목 / 카테고리 / 썸네일 미리보기 / 정렬)
+- 라이브 스트림 정보 편집 (제목 / 카테고리 / 태그 / 썸네일 미리보기 / 정렬)
 
 ## 기여
 기여를 환영합니다!

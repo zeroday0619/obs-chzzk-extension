@@ -130,6 +130,7 @@ struct LiveDockResponse {
     category_type: Option<String>,
     category_id: Option<String>,
     category_name: Option<String>,
+    tags: Option<Vec<String>>,
     categories: Option<Vec<LiveDockCategoryEntry>>,
 }
 
@@ -186,6 +187,13 @@ fn response_json_ptr(response: LiveDockResponse) -> *mut c_char {
             "categoryName".to_string(),
             Value::String(sanitize_c_text(&category_name)),
         );
+    }
+    if let Some(tags) = response.tags {
+        let values = tags
+            .into_iter()
+            .map(|tag| Value::String(sanitize_c_text(&tag)))
+            .collect::<Vec<_>>();
+        payload.insert("tags".to_string(), Value::Array(values));
     }
     if let Some(categories) = response.categories {
         let values = categories
@@ -244,6 +252,7 @@ fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> 
         category_type: Some(live.category_type.unwrap_or_default()),
         category_id: Some(live.category_id.unwrap_or_default()),
         category_name: Some(live.category_name.unwrap_or_default()),
+        tags: Some(live.tags.unwrap_or_default()),
         categories: None,
     })
 }
@@ -294,7 +303,29 @@ fn search_category_response(query: &str) -> Result<LiveDockResponse, String> {
     })
 }
 
-fn apply_live_update_response(live_title: &str, category_type: &str, category_id: &str) -> Result<LiveDockResponse, String> {
+fn parse_tags_input(raw: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+
+    for part in raw.split(|ch| ch == ',' || ch == '\n' || ch == '\r') {
+        let tag = part.trim();
+        if tag.is_empty() {
+            continue;
+        }
+
+        if !tags.iter().any(|item| item == tag) {
+            tags.push(tag.to_string());
+        }
+    }
+
+    tags
+}
+
+fn apply_live_update_response(
+    live_title: &str,
+    category_type: &str,
+    category_id: &str,
+    tags_input: &str,
+) -> Result<LiveDockResponse, String> {
     let settings = current_settings();
     let access_token = settings.chzzk_authorization_token.trim();
     if access_token.is_empty() {
@@ -322,6 +353,11 @@ fn apply_live_update_response(live_title: &str, category_type: &str, category_id
         update.category_id = Some(category_id.to_string());
     }
 
+    let tags = parse_tags_input(tags_input);
+    if !tags.is_empty() {
+        update.tags = Some(tags);
+    }
+
     if update.is_empty() {
         return Err("No live setting changes to apply".to_string());
     }
@@ -335,6 +371,32 @@ fn apply_live_update_response(live_title: &str, category_type: &str, category_id
         Ok(response) => Ok(response),
         Err(error) => Ok(LiveDockResponse::success(&format!(
             "Live setting updated, but failed to refresh fields: {}",
+            error
+        ))),
+    }
+}
+
+fn clear_live_tags_response() -> Result<LiveDockResponse, String> {
+    let settings = current_settings();
+    let access_token = settings.chzzk_authorization_token.trim();
+    if access_token.is_empty() {
+        return Err("CHZZK account is not linked. Run OAuth first.".to_string());
+    }
+
+    let clear_update = ChzzkLiveSettingUpdate {
+        tags: Some(Vec::new()),
+        ..ChzzkLiveSettingUpdate::default()
+    };
+
+    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
+    client
+        .update_live_settings(access_token, &clear_update)
+        .map_err(|error| format!("Failed to clear live tags: {}", error))?;
+
+    match load_live_setting_response("Live tags cleared") {
+        Ok(response) => Ok(response),
+        Err(error) => Ok(LiveDockResponse::success(&format!(
+            "Live tags cleared, but failed to refresh fields: {}",
             error
         ))),
     }
@@ -405,11 +467,13 @@ pub unsafe extern "C" fn obs_chzzk_live_dock_apply_update_json(
     live_title: *const c_char,
     category_type: *const c_char,
     category_id: *const c_char,
+    tags: *const c_char,
 ) -> *mut c_char {
     let response = match apply_live_update_response(
         &c_input_value(live_title),
         &c_input_value(category_type),
         &c_input_value(category_id),
+        &c_input_value(tags),
     ) {
         Ok(response) => response,
         Err(error) => {
@@ -424,6 +488,19 @@ pub unsafe extern "C" fn obs_chzzk_live_dock_apply_update_json(
 #[no_mangle]
 pub extern "C" fn obs_chzzk_live_dock_clear_category_json() -> *mut c_char {
     let response = match clear_live_category_response() {
+        Ok(response) => response,
+        Err(error) => {
+            log_error(&error);
+            LiveDockResponse::error(error)
+        }
+    };
+
+    response_json_ptr(response)
+}
+
+#[no_mangle]
+pub extern "C" fn obs_chzzk_live_dock_clear_tags_json() -> *mut c_char {
+    let response = match clear_live_tags_response() {
         Ok(response) => response,
         Err(error) => {
             log_error(&error);

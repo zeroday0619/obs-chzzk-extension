@@ -17,6 +17,7 @@
 #include <QResizeEvent>
 #include <QSizePolicy>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVector>
@@ -26,8 +27,13 @@
 extern "C" {
 char *obs_chzzk_live_dock_load_current_json();
 char *obs_chzzk_live_dock_search_category_json(const char *query);
-char *obs_chzzk_live_dock_apply_update_json(const char *live_title, const char *category_type, const char *category_id);
+char *obs_chzzk_live_dock_apply_update_json(
+    const char *live_title,
+    const char *category_type,
+    const char *category_id,
+    const char *tags);
 char *obs_chzzk_live_dock_clear_category_json();
+char *obs_chzzk_live_dock_clear_tags_json();
 void obs_chzzk_live_dock_free_json(char *json_text);
 }
 
@@ -59,6 +65,10 @@ public:
         root->addWidget(new QLabel("Live Title", this));
         live_title_edit_ = new QLineEdit(this);
         root->addWidget(live_title_edit_);
+
+        root->addWidget(new QLabel("Tags (comma-separated)", this));
+        tags_edit_ = new QLineEdit(this);
+        root->addWidget(tags_edit_);
 
         root->addWidget(new QLabel("Category Search Query", this));
         category_query_edit_ = new QLineEdit(this);
@@ -103,8 +113,10 @@ public:
         auto *apply_row = new QHBoxLayout();
         auto *apply_button = new QPushButton("Apply", this);
         auto *clear_button = new QPushButton("Clear Category", this);
+        auto *clear_tags_button = new QPushButton("Clear Tags", this);
         apply_row->addWidget(apply_button);
         apply_row->addWidget(clear_button);
+        apply_row->addWidget(clear_tags_button);
         root->addLayout(apply_row);
 
         root->addWidget(new QLabel("Status", this));
@@ -144,16 +156,22 @@ public:
             apply_response(call_apply_update(
                 live_title_edit_->text().trimmed(),
                 category_type_edit_->text().trimmed(),
-                category_id_edit_->text().trimmed()));
+                category_id_edit_->text().trimmed(),
+                tags_edit_->text().trimmed()));
         });
 
         connect(clear_button, &QPushButton::clicked, this, [this]() {
             apply_response(call_clear_category());
         });
+
+        connect(clear_tags_button, &QPushButton::clicked, this, [this]() {
+            apply_response(call_clear_tags());
+        });
     }
 
 private:
     QLineEdit *live_title_edit_ = nullptr;
+    QLineEdit *tags_edit_ = nullptr;
     QLineEdit *category_query_edit_ = nullptr;
     QComboBox *category_results_combo_ = nullptr;
     QComboBox *sort_mode_combo_ = nullptr;
@@ -380,21 +398,32 @@ private:
         return decode_result(obs_chzzk_live_dock_search_category_json(to_utf8_cstr(query, query_utf8)));
     }
 
-    QJsonObject call_apply_update(const QString &live_title, const QString &category_type, const QString &category_id)
+    QJsonObject call_apply_update(
+        const QString &live_title,
+        const QString &category_type,
+        const QString &category_id,
+        const QString &tags)
     {
         QByteArray title_utf8;
         QByteArray type_utf8;
         QByteArray id_utf8;
+        QByteArray tags_utf8;
 
         return decode_result(obs_chzzk_live_dock_apply_update_json(
             to_utf8_cstr(live_title, title_utf8),
             to_utf8_cstr(category_type, type_utf8),
-            to_utf8_cstr(category_id, id_utf8)));
+            to_utf8_cstr(category_id, id_utf8),
+            to_utf8_cstr(tags, tags_utf8)));
     }
 
     QJsonObject call_clear_category()
     {
         return decode_result(obs_chzzk_live_dock_clear_category_json());
+    }
+
+    QJsonObject call_clear_tags()
+    {
+        return decode_result(obs_chzzk_live_dock_clear_tags_json());
     }
 
     void apply_category_selection(int index)
@@ -514,6 +543,26 @@ private:
 
         if (response.contains("liveTitle")) {
             live_title_edit_->setText(response.value("liveTitle").toString());
+        }
+        if (response.contains("tags")) {
+            const QJsonValue tags_value = response.value("tags");
+            if (tags_value.isArray()) {
+                QStringList tags;
+                for (const QJsonValue &value : tags_value.toArray()) {
+                    if (!value.isString()) {
+                        continue;
+                    }
+
+                    const QString tag = value.toString().trimmed();
+                    if (!tag.isEmpty()) {
+                        tags.append(tag);
+                    }
+                }
+
+                tags_edit_->setText(tags.join(", "));
+            } else {
+                tags_edit_->clear();
+            }
         }
         if (response.contains("categoryType")) {
             category_type_edit_->setText(response.value("categoryType").toString());

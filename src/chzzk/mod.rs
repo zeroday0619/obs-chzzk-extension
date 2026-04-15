@@ -20,6 +20,7 @@ pub(crate) struct ChzzkLiveSettings {
     pub(crate) category_type: Option<String>,
     pub(crate) category_id: Option<String>,
     pub(crate) category_name: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -210,13 +211,15 @@ impl ChzzkClient {
         let category_name = category
             .and_then(|cat| extract_string(cat, "categoryValue"))
             .or_else(|| extract_string(payload, "liveCategoryValue"));
+        let tags = extract_string_array(payload, "tags");
 
         debug(format!(
-            "CHZZK live-setting parsed: title={}, category_type={}, category_id={}, category={}",
+            "CHZZK live-setting parsed: title={}, category_type={}, category_id={}, category={}, tags={}",
             live_title.is_some(),
             category_type.is_some(),
             category_id.is_some(),
-            category_name.is_some()
+            category_name.is_some(),
+            tags.is_some()
         ));
 
         Ok(ChzzkLiveSettings {
@@ -224,6 +227,7 @@ impl ChzzkClient {
             category_type,
             category_id,
             category_name,
+            tags,
         })
     }
 
@@ -671,6 +675,19 @@ fn extract_string(value: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(|text| text.to_string())
+}
+
+fn extract_string_array(value: &Value, key: &str) -> Option<Vec<String>> {
+    let items = value.get(key)?.as_array()?;
+    let values = items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| text.to_string())
+        .collect::<Vec<_>>();
+
+    Some(values)
 }
 
 fn extract_payload<'a>(root: &'a Value) -> &'a Value {
