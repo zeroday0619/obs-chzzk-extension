@@ -36,12 +36,12 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
         4. `Save Changes` をクリックして設定を適用し、`Application ID` を取得します。
 3. 必要に応じて設定を行います。
 4. `Ok` をクリックして設定を適用します。
+5. `Docks` > `CHZZK Live Editor` で配信タイトル/カテゴリを編集します。
 
 ## 機能
 ### 実装済み
 - Discord Rich Presence 連携
-### 予定
-- ライブ配信情報の編集
+- ライブ配信情報の編集（タイトル / カテゴリ / サムネイルプレビュー / 並び替え）
 
 ## コントリビューション
 コントリビューションを歓迎します！

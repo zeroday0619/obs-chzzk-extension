@@ -17,7 +17,34 @@ const MASKED: &str = "***";
 #[derive(Clone)]
 pub(crate) struct ChzzkLiveSettings {
     pub(crate) live_title: Option<String>,
+    pub(crate) category_type: Option<String>,
+    pub(crate) category_id: Option<String>,
     pub(crate) category_name: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ChzzkCategory {
+    pub(crate) category_type: String,
+    pub(crate) category_id: String,
+    pub(crate) category_value: String,
+    pub(crate) poster_image_url: Option<String>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ChzzkLiveSettingUpdate {
+    pub(crate) default_live_title: Option<String>,
+    pub(crate) category_type: Option<String>,
+    pub(crate) category_id: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
+}
+
+impl ChzzkLiveSettingUpdate {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.default_live_title.is_none()
+            && self.category_type.is_none()
+            && self.category_id.is_none()
+            && self.tags.is_none()
+    }
 }
 
 #[derive(Clone)]
@@ -170,23 +197,215 @@ impl ChzzkClient {
 
         validate_api_code(&root)?;
         let payload = extract_payload(&root);
+        let category = payload.get("category");
 
         let live_title = extract_string(payload, "defaultLiveTitle");
-        let category_name = payload
-            .get("category")
+        let category_type = category
+            .and_then(|cat| extract_string(cat, "categoryType"))
+            .or_else(|| extract_string(payload, "categoryType"));
+        let category_id = category
+            .and_then(|cat| extract_string(cat, "categoryId"))
+            .or_else(|| extract_string(payload, "categoryId"))
+            .or_else(|| extract_string(payload, "liveCategory"));
+        let category_name = category
             .and_then(|cat| extract_string(cat, "categoryValue"))
             .or_else(|| extract_string(payload, "liveCategoryValue"));
 
         debug(format!(
-            "CHZZK live-setting parsed: title={}, category={}",
+            "CHZZK live-setting parsed: title={}, category_type={}, category_id={}, category={}",
             live_title.is_some(),
+            category_type.is_some(),
+            category_id.is_some(),
             category_name.is_some()
         ));
 
         Ok(ChzzkLiveSettings {
             live_title,
+            category_type,
+            category_id,
             category_name,
         })
+    }
+
+    pub(crate) fn update_live_settings(
+        &self,
+        access_token: &str,
+        update: &ChzzkLiveSettingUpdate,
+    ) -> Result<(), ChzzkApiError> {
+        let access_token = access_token.trim();
+        if access_token.is_empty() {
+            return Err(ChzzkApiError("access_token is required".to_string()));
+        }
+        if update.is_empty() {
+            return Err(ChzzkApiError("live setting update payload is empty".to_string()));
+        }
+
+        let endpoint = format!("{}/open/v1/lives/setting", self.api_base);
+        let authorization = format!("Bearer {}", access_token);
+        let masked_authorization = format!("Bearer {}", mask_secret(access_token));
+
+        let mut body = serde_json::Map::new();
+
+        if let Some(title) = update.default_live_title.as_deref() {
+            let title = title.trim();
+            if title.is_empty() {
+                return Err(ChzzkApiError(
+                    "default_live_title cannot be empty when provided".to_string(),
+                ));
+            }
+            body.insert(
+                "defaultLiveTitle".to_string(),
+                Value::String(title.to_string()),
+            );
+        }
+
+        if let Some(category_type) = update
+            .category_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            body.insert(
+                "categoryType".to_string(),
+                Value::String(category_type.to_string()),
+            );
+        }
+
+        if let Some(category_id) = &update.category_id {
+            body.insert(
+                "categoryId".to_string(),
+                Value::String(category_id.trim().to_string()),
+            );
+        }
+
+        if let Some(tags) = &update.tags {
+            let tag_values = tags
+                .iter()
+                .map(|tag| tag.trim())
+                .filter(|tag| !tag.is_empty())
+                .map(|tag| Value::String(tag.to_string()))
+                .collect::<Vec<_>>();
+            body.insert("tags".to_string(), Value::Array(tag_values));
+        }
+
+        if body.is_empty() {
+            return Err(ChzzkApiError(
+                "live setting update payload has no valid fields".to_string(),
+            ));
+        }
+
+        let body = Value::Object(body);
+
+        debug(format!(
+            "CHZZK API request: method=PATCH endpoint={} headers={{\"Authorization\":\"{}\",\"Content-Type\":\"application/json\"}} body={}",
+            endpoint,
+            masked_authorization,
+            masked_json_string(&body)
+        ));
+
+        let root = self
+            .agent
+            .request("PATCH", &endpoint)
+            .set("Authorization", &authorization)
+            .set("Content-Type", "application/json")
+            .send_json(body)
+            .map_err(|error| to_api_error(error, "CHZZK live-setting patch request failed"))?
+            .into_json::<Value>()
+            .map_err(|error| ChzzkApiError(format!("CHZZK live-setting patch parse failed: {error}")))?;
+
+        debug(format!(
+            "CHZZK API response: method=PATCH endpoint={} body={}",
+            endpoint,
+            masked_json_string(&root)
+        ));
+
+        validate_api_code(&root)?;
+        Ok(())
+    }
+
+    pub(crate) fn search_categories(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        query: &str,
+        size: Option<u32>,
+    ) -> Result<Vec<ChzzkCategory>, ChzzkApiError> {
+        let client_id = client_id.trim();
+        let client_secret = client_secret.trim();
+        let query = query.trim();
+
+        if client_id.is_empty() {
+            return Err(ChzzkApiError("client_id is required".to_string()));
+        }
+        if client_secret.is_empty() {
+            return Err(ChzzkApiError("client_secret is required".to_string()));
+        }
+        if query.is_empty() {
+            return Err(ChzzkApiError("query is required".to_string()));
+        }
+
+        let size = size.unwrap_or(20).clamp(1, 50);
+        let endpoint = format!(
+            "{}/open/v1/categories/search?query={}&size={}",
+            self.api_base,
+            simple_url_encode(query),
+            size
+        );
+
+        debug(format!(
+            "CHZZK API request: method=GET endpoint={} headers={{\"Client-Id\":\"{}\",\"Client-Secret\":\"{}\",\"Content-Type\":\"application/json\"}}",
+            endpoint,
+            mask_secret(client_id),
+            mask_secret(client_secret)
+        ));
+
+        let root = self
+            .agent
+            .get(&endpoint)
+            .set("Client-Id", client_id)
+            .set("Client-Secret", client_secret)
+            .set("Content-Type", "application/json")
+            .call()
+            .map_err(|error| to_api_error(error, "CHZZK category search request failed"))?
+            .into_json::<Value>()
+            .map_err(|error| ChzzkApiError(format!("CHZZK category search parse failed: {error}")))?;
+
+        debug(format!(
+            "CHZZK API response: method=GET endpoint={} body={}",
+            endpoint,
+            masked_json_string(&root)
+        ));
+
+        validate_api_code(&root)?;
+        let payload = extract_payload(&root);
+        let category_items = payload
+            .as_array()
+            .ok_or_else(|| ChzzkApiError(format!("CHZZK category response missing list: {}", root)))?;
+
+        let categories = category_items
+            .iter()
+            .filter_map(|item| {
+                let category_type = extract_string(item, "categoryType")?;
+                let category_id = extract_string(item, "categoryId")?;
+                let category_value = extract_string(item, "categoryValue")?;
+                let poster_image_url = extract_string(item, "posterImageUrl");
+
+                Some(ChzzkCategory {
+                    category_type,
+                    category_id,
+                    category_value,
+                    poster_image_url,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        debug(format!(
+            "CHZZK category search parsed: query='{}', count={}",
+            query,
+            categories.len()
+        ));
+
+        Ok(categories)
     }
 
     pub(crate) fn fetch_live_thumbnail_image_url(
@@ -498,15 +717,19 @@ fn is_sensitive_key(key: &str) -> bool {
         "authorization"
             | "clientid"
             | "client_id"
+            | "client-id"
             | "clientsecret"
             | "client_secret"
+            | "client-secret"
             | "code"
             | "state"
             | "token"
             | "accesstoken"
             | "access_token"
+            | "access-token"
             | "refreshtoken"
             | "refresh_token"
+            | "refresh-token"
     )
 }
 
