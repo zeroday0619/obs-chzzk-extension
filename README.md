@@ -35,6 +35,8 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
 - Debian packaging files are stored in `debian/`.
 - Packaging helper scripts are stored in `scripts/`.
 - A Debian packaging container is provided in `docker/debian-package/`.
+- GitHub Actions workflow `.github/workflows/build-and-package.yml` builds the release plugin and Debian packages on pushes, pull requests, tags, and manual runs.
+- The workflow uploads `libobs_chzzk_extension.so` and Debian packaging artifacts as workflow artifacts.
 
 ```bash
 # Generate debian/changelog from git commits

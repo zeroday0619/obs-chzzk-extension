@@ -35,6 +35,8 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
 - 데비안 패키징 파일은 `debian/` 디렉터리에 있습니다.
 - 패키징 보조 스크립트는 `scripts/` 디렉터리에 있습니다.
 - 데비안 패키징용 컨테이너는 `docker/debian-package/` 디렉터리에 있습니다.
+- GitHub Actions 워크플로 `.github/workflows/build-and-package.yml` 은 push, pull request, 태그, 수동 실행에서 릴리스 플러그인과 데비안 패키지를 빌드합니다.
+- 워크플로는 `libobs_chzzk_extension.so` 와 데비안 패키징 산출물을 워크플로 아티팩트로 업로드합니다.
 
 ```bash
 # git 커밋 로그 기반으로 debian/changelog 생성

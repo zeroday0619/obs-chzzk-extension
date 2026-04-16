@@ -1,0 +1,90 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkgconf \
+            qt6-base-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          components: rustfmt
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Build release plugin
+        run: cargo build --release --locked
+
+      - name: Run tests
+        run: cargo test --release --locked
+
+      - name: Upload release plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-chzzk-extension-plugin-${{ github.sha }}
+          path: target/release/libobs_chzzk_extension.so
+          if-no-files-found: error
+
+  package:
+    name: Debian Package
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Debian packaging image
+        run: docker build -f docker/debian-package/Dockerfile -t obs-chzzk-extension-deb .
+
+      - name: Build Debian package artifacts
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD":/work \
+            -w /work \
+            obs-chzzk-extension-deb \
+            scripts/build-deb.sh --clean --artifacts-dir dist
+
+      - name: Upload Debian package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-chzzk-extension-deb-${{ github.sha }}
+          path: |
+            dist/*.deb
+            dist/*.buildinfo
+            dist/*.changes
+            dist/*.build
+          if-no-files-found: error

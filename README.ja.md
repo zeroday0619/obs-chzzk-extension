@@ -35,6 +35,8 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
 - Debian パッケージング用ファイルは `debian/` ディレクトリにあります。
 - パッケージング補助スクリプトは `scripts/` ディレクトリにあります。
 - Debian パッケージング用コンテナは `docker/debian-package/` ディレクトリにあります。
+- GitHub Actions ワークフロー `.github/workflows/build-and-package.yml` は、push、pull request、タグ、手動実行でリリースプラグインと Debian パッケージをビルドします。
+- ワークフローは `libobs_chzzk_extension.so` と Debian パッケージ成果物をワークフローアーティファクトとしてアップロードします。
 
 ```bash
 # git コミットログから debian/changelog を生成

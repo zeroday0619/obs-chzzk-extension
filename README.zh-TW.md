@@ -35,6 +35,8 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
 - Debian 封裝相關檔案位於 `debian/` 目錄。
 - 封裝輔助腳本位於 `scripts/` 目錄。
 - Debian 封裝用容器位於 `docker/debian-package/` 目錄。
+- GitHub Actions 工作流程 `.github/workflows/build-and-package.yml` 會在 push、pull request、標籤與手動執行時建置 release 外掛與 Debian 套件。
+- 工作流程會將 `libobs_chzzk_extension.so` 與 Debian 封裝產物上傳為 workflow artifacts。
 
 ```bash
 # 根據 git commit 記錄產生 debian/changelog
