@@ -15,11 +15,15 @@ fn oauth_redirect_uri() -> String {
 }
 
 pub(crate) fn request_authorization_token(settings: &PluginSettings) -> Result<String, String> {
-    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty() {
+    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty()
+    {
         return Err("obs-chzzk-extension: Client ID or Client Secret not configured".to_string());
     }
 
-    debug(format!("Starting OAuth callback server on port {}", OAUTH_CALLBACK_PORT));
+    debug(format!(
+        "Starting OAuth callback server on port {}",
+        OAUTH_CALLBACK_PORT
+    ));
     let oauth_server = OAuthCallbackServer::new();
 
     let state = format!(
@@ -68,7 +72,8 @@ pub(crate) fn request_authorization_token(settings: &PluginSettings) -> Result<S
 }
 
 pub(crate) fn revoke_token(settings: &PluginSettings) -> Result<(), String> {
-    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty() {
+    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty()
+    {
         return Err("obs-chzzk-extension: Client ID or Client Secret not configured".to_string());
     }
 
@@ -86,7 +91,10 @@ pub(crate) fn revoke_token(settings: &PluginSettings) -> Result<(), String> {
         .map_err(|error| format!("Failed to revoke CHZZK token: {}", error))
 }
 
-fn wait_for_oauth_callback(server: &OAuthCallbackServer, timeout: Duration) -> Option<OAuthCallbackData> {
+fn wait_for_oauth_callback(
+    server: &OAuthCallbackServer,
+    timeout: Duration,
+) -> Option<OAuthCallbackData> {
     let started = Instant::now();
     while started.elapsed() < timeout {
         if let Some(result) = server.get_result() {

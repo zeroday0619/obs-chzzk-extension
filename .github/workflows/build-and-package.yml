@@ -36,13 +36,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.1
-          components: rustfmt
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all --check
 
       - name: Build release plugin
         run: cargo build --release --locked

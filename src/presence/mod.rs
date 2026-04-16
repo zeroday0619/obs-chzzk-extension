@@ -2,7 +2,7 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::chzzk::ChzzkClient;
-use crate::logging::{debug, warn, info};
+use crate::logging::{debug, info, warn};
 use crate::settings::current_settings;
 
 #[allow(dead_code)]
@@ -290,9 +290,7 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
                 .as_ref()
                 .map(|category| format!("카테고리: {}", category))
         })
-        .or_else(|| {
-            channel_name.clone()
-        })
+        .or_else(|| channel_name.clone())
         .unwrap_or_else(|| "CHZZK".to_string());
 
     let live_thumbnail_image_url = match client.fetch_live_thumbnail_image_url(
@@ -320,7 +318,9 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
     let activity_type = ActivityType::Playing;
 
     if button_url.is_some() && stream_url.is_none() {
-        warn("streaming URL is not twitch/youtube; activity type remains PLAYING without url field");
+        warn(
+            "streaming URL is not twitch/youtube; activity type remains PLAYING without url field",
+        );
     }
 
     let mut activity = PresenceActivity::new(activity_name.clone())
@@ -456,6 +456,9 @@ pub(crate) fn build_clear_activity_payload() -> String {
 }
 
 pub(crate) fn build_handshake_payload(application_id: &str) -> String {
-    debug(format!("building Discord handshake payload for app_id={}", application_id));
+    debug(format!(
+        "building Discord handshake payload for app_id={}",
+        application_id
+    ));
     format!("{{\"v\":1,\"client_id\":{}}}", json_string(application_id))
 }

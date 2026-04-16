@@ -12,7 +12,9 @@ fn settings_store() -> &'static Mutex<PluginSettings> {
 
 pub(crate) fn apply_runtime_settings(next: PluginSettings) {
     debug("applying runtime settings snapshot");
-    let mut current = settings_store().lock().unwrap_or_else(|error| error.into_inner());
+    let mut current = settings_store()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     *current = next;
 }
 

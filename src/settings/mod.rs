@@ -357,7 +357,8 @@ pub(crate) fn search_category_response(query: &str) -> Result<LiveDockResponse, 
     }
 
     let settings = current_settings();
-    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty() {
+    if settings.chzzk_client_id.trim().is_empty() || settings.chzzk_client_secret.trim().is_empty()
+    {
         return Err("CHZZK Client ID/Secret are required for category search".to_string());
     }
 
@@ -387,7 +388,10 @@ pub(crate) fn search_category_response(query: &str) -> Result<LiveDockResponse, 
 
     Ok(LiveDockResponse {
         ok: true,
-        status: format!("Found {} categories. Select one from the list.", entries.len()),
+        status: format!(
+            "Found {} categories. Select one from the list.",
+            entries.len()
+        ),
         category_type: Some(first.category_type.clone()),
         category_id: Some(first.category_id.clone()),
         category_name: Some(first.category_name.clone()),
@@ -543,7 +547,9 @@ pub extern "C" fn obs_chzzk_live_dock_load_current_json() -> *mut c_char {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn obs_chzzk_live_dock_search_category_json(query: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn obs_chzzk_live_dock_search_category_json(
+    query: *const c_char,
+) -> *mut c_char {
     let response = match search_category_response(&c_input_value(query)) {
         Ok(response) => response,
         Err(error) => {
@@ -613,7 +619,10 @@ pub unsafe extern "C" fn obs_chzzk_live_dock_free_json(json_text: *mut c_char) {
 
 fn sync_source_auth_fields(settings: &PluginSettings) {
     let _ = update_source_text_fields(&[
-        (KEY_CHZZK_AUTHORIZATION_TOKEN, settings.chzzk_authorization_token.as_str()),
+        (
+            KEY_CHZZK_AUTHORIZATION_TOKEN,
+            settings.chzzk_authorization_token.as_str(),
+        ),
         (KEY_CHZZK_AUTH_STATUS, settings.chzzk_auth_status.as_str()),
     ]);
 }
@@ -660,7 +669,10 @@ unsafe extern "C" fn settings_source_get_name(_type_data: *mut c_void) -> *const
     c_char_ptr(SOURCE_NAME)
 }
 
-unsafe extern "C" fn settings_source_create(settings: *mut c_void, _source: *mut c_void) -> *mut c_void {
+unsafe extern "C" fn settings_source_create(
+    settings: *mut c_void,
+    _source: *mut c_void,
+) -> *mut c_void {
     info("settings source create called");
     let next = settings_from_obs_data(settings);
     apply_runtime_settings(next.clone());
@@ -682,13 +694,21 @@ unsafe extern "C" fn settings_source_defaults(settings: *mut c_void) {
         obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_CLIENT_ID), value.as_ptr());
     }
     if let Some(value) = c_string(&current.chzzk_client_secret) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_CLIENT_SECRET), value.as_ptr());
+        obs_data_set_default_string(
+            settings,
+            c_char_ptr(KEY_CHZZK_CLIENT_SECRET),
+            value.as_ptr(),
+        );
     }
     if let Some(value) = c_string(&current.chzzk_api_base_url) {
         obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_API_BASE_URL), value.as_ptr());
     }
     if let Some(value) = c_string(&current.discord_application_id) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_DISCORD_APPLICATION_ID), value.as_ptr());
+        obs_data_set_default_string(
+            settings,
+            c_char_ptr(KEY_DISCORD_APPLICATION_ID),
+            value.as_ptr(),
+        );
     }
     obs_data_set_default_bool(
         settings,
@@ -696,10 +716,18 @@ unsafe extern "C" fn settings_source_defaults(settings: *mut c_void) {
         current.discord_presence_enabled,
     );
     if let Some(value) = c_string(&current.discord_activity_name) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_DISCORD_ACTIVITY_NAME), value.as_ptr());
+        obs_data_set_default_string(
+            settings,
+            c_char_ptr(KEY_DISCORD_ACTIVITY_NAME),
+            value.as_ptr(),
+        );
     }
     if let Some(value) = c_string(&current.chzzk_authorization_token) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_AUTHORIZATION_TOKEN), value.as_ptr());
+        obs_data_set_default_string(
+            settings,
+            c_char_ptr(KEY_CHZZK_AUTHORIZATION_TOKEN),
+            value.as_ptr(),
+        );
     }
     if let Some(value) = c_string(&current.chzzk_auth_status) {
         obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_AUTH_STATUS), value.as_ptr());
@@ -816,7 +844,10 @@ unsafe extern "C" fn open_settings_dialog(_private_data: *mut c_void) {
     obs_frontend_open_source_properties(source);
 }
 
-unsafe extern "C" fn oauth_button_clicked(_properties: *mut c_void, _property: *mut c_void) -> bool {
+unsafe extern "C" fn oauth_button_clicked(
+    _properties: *mut c_void,
+    _property: *mut c_void,
+) -> bool {
     info("OAuth button clicked - initiating authorization flow");
 
     let settings = current_settings();
@@ -838,7 +869,10 @@ unsafe extern "C" fn oauth_button_clicked(_properties: *mut c_void, _property: *
     }
 }
 
-unsafe extern "C" fn revoke_button_clicked(_properties: *mut c_void, _property: *mut c_void) -> bool {
+unsafe extern "C" fn revoke_button_clicked(
+    _properties: *mut c_void,
+    _property: *mut c_void,
+) -> bool {
     info("Revoke button clicked - revoking CHZZK token");
 
     let settings = current_settings();

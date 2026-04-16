@@ -48,11 +48,7 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "searchCategory"]
-        fn search_category(
-            self: Pin<&mut LiveDockBridge>,
-            query: &QString,
-            sort_by_name: bool,
-        );
+        fn search_category(self: Pin<&mut LiveDockBridge>, query: &QString, sort_by_name: bool);
 
         #[qinvokable]
         #[cxx_name = "applyUpdate"]
@@ -187,11 +183,7 @@ impl qobject::LiveDockBridge {
         self.as_mut().apply_result(response, None);
     }
 
-    fn refresh_category_results(
-        mut self: Pin<&mut Self>,
-        query: &QString,
-        sort_by_name: bool,
-    ) {
+    fn refresh_category_results(mut self: Pin<&mut Self>, query: &QString, sort_by_name: bool) {
         self.as_mut()
             .rebuild_sorted_results(&query.to_string(), sort_by_name);
 
@@ -208,7 +200,8 @@ impl qobject::LiveDockBridge {
             self.as_mut().set_category_name(item.category_name.clone());
             self.as_mut().set_category_type(item.category_type.clone());
             self.as_mut().set_category_id(item.category_id.clone());
-            self.as_mut().set_poster_image_url(item.poster_image_url.clone());
+            self.as_mut()
+                .set_poster_image_url(item.poster_image_url.clone());
         }
     }
 
@@ -217,7 +210,9 @@ impl qobject::LiveDockBridge {
             return QString::default();
         };
 
-        format!("{} ({})", item.category_name, item.category_type).as_str().into()
+        format!("{} ({})", item.category_name, item.category_type)
+            .as_str()
+            .into()
     }
 
     fn category_result_name(&self, index: i32) -> QString {

@@ -54,7 +54,11 @@ impl OAuthCallbackServer {
     }
 }
 
-fn handle_client(mut stream: TcpStream, result: Arc<Mutex<Option<OAuthCallbackData>>>, expected_state: &str) {
+fn handle_client(
+    mut stream: TcpStream,
+    result: Arc<Mutex<Option<OAuthCallbackData>>>,
+    expected_state: &str,
+) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
 
     let mut buffer = [0; MAX_REQUEST_BYTES];

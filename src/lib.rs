@@ -19,10 +19,10 @@ mod settings;
 
 #[cfg(unix)]
 use discord::run_presence_worker;
-#[cfg(unix)]
-use logging::{debug, info, warn};
 #[cfg(not(unix))]
 use logging::{debug, info};
+#[cfg(unix)]
+use logging::{debug, info, warn};
 #[cfg(unix)]
 use presence::{build_presence_config, PresenceCommand, PresenceConfig};
 
@@ -90,7 +90,9 @@ fn start_presence_for_current_stream() {
         return;
     }
 
-    let token = PRESENCE_START_TOKEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let token = PRESENCE_START_TOKEN
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     info(format!(
         "presence start scheduled with {}s delay (token={})",
         PRESENCE_START_DELAY_SECS, token
@@ -136,7 +138,9 @@ fn start_presence_for_current_stream() {}
 
 #[cfg(unix)]
 pub(crate) fn stop_presence() {
-    let token = PRESENCE_START_TOKEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let token = PRESENCE_START_TOKEN
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     debug(format!(
         "presence stop requested: invalidated pending delayed starts (token={})",
         token
@@ -179,7 +183,9 @@ unsafe extern "C" fn frontend_event_callback(event: ObsFrontendEvent, _private_d
     ));
     match event {
         OBS_FRONTEND_EVENT_STREAMING_STARTED => start_presence_for_current_stream(),
-        OBS_FRONTEND_EVENT_STREAMING_STOPPING | OBS_FRONTEND_EVENT_STREAMING_STOPPED | OBS_FRONTEND_EVENT_EXIT => {
+        OBS_FRONTEND_EVENT_STREAMING_STOPPING
+        | OBS_FRONTEND_EVENT_STREAMING_STOPPED
+        | OBS_FRONTEND_EVENT_EXIT => {
             stop_presence();
         }
         _ => {}

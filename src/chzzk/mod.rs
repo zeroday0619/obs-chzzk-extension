@@ -154,16 +154,25 @@ impl ChzzkClient {
         info(format!("CHZZK token exchange request: {}", endpoint));
 
         let mut body = serde_json::Map::new();
-        body.insert("grantType".to_string(), Value::String("authorization_code".to_string()));
+        body.insert(
+            "grantType".to_string(),
+            Value::String("authorization_code".to_string()),
+        );
         body.insert("clientId".to_string(), Value::String(client_id.to_string()));
-        body.insert("clientSecret".to_string(), Value::String(client_secret.to_string()));
+        body.insert(
+            "clientSecret".to_string(),
+            Value::String(client_secret.to_string()),
+        );
         body.insert("code".to_string(), Value::String(code.to_string()));
         body.insert("state".to_string(), Value::String(state_val.to_string()));
 
         let root = self.post_json(&endpoint, Value::Object(body))?;
         let access_token = extract_access_token(&root)?;
 
-        info(format!("CHZZK access token exchanged: len={}", access_token.len()));
+        info(format!(
+            "CHZZK access token exchanged: len={}",
+            access_token.len()
+        ));
         Ok(access_token)
     }
 
@@ -241,7 +250,9 @@ impl ChzzkClient {
             return Err(ChzzkApiError("access_token is required".to_string()));
         }
         if update.is_empty() {
-            return Err(ChzzkApiError("live setting update payload is empty".to_string()));
+            return Err(ChzzkApiError(
+                "live setting update payload is empty".to_string(),
+            ));
         }
 
         let endpoint = format!("{}/open/v1/lives/setting", self.api_base);
@@ -315,7 +326,9 @@ impl ChzzkClient {
             .send_json(body)
             .map_err(|error| to_api_error(error, "CHZZK live-setting patch request failed"))?
             .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK live-setting patch parse failed: {error}")))?;
+            .map_err(|error| {
+                ChzzkApiError(format!("CHZZK live-setting patch parse failed: {error}"))
+            })?;
 
         debug(format!(
             "CHZZK API response: method=PATCH endpoint={} body={}",
@@ -372,7 +385,9 @@ impl ChzzkClient {
             .call()
             .map_err(|error| to_api_error(error, "CHZZK category search request failed"))?
             .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK category search parse failed: {error}")))?;
+            .map_err(|error| {
+                ChzzkApiError(format!("CHZZK category search parse failed: {error}"))
+            })?;
 
         debug(format!(
             "CHZZK API response: method=GET endpoint={} body={}",
@@ -382,9 +397,9 @@ impl ChzzkClient {
 
         validate_api_code(&root)?;
         let payload = extract_payload(&root);
-        let category_items = payload
-            .as_array()
-            .ok_or_else(|| ChzzkApiError(format!("CHZZK category response missing list: {}", root)))?;
+        let category_items = payload.as_array().ok_or_else(|| {
+            ChzzkApiError(format!("CHZZK category response missing list: {}", root))
+        })?;
 
         let categories = category_items
             .iter()
@@ -419,7 +434,9 @@ impl ChzzkClient {
         let channel_id = channel_id
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| ChzzkApiError("channel_id is required for unofficial live-detail".to_string()))?;
+            .ok_or_else(|| {
+                ChzzkApiError("channel_id is required for unofficial live-detail".to_string())
+            })?;
 
         let endpoint = format!(
             "{}/service/v2/channels/{}/live-detail",
@@ -441,7 +458,11 @@ impl ChzzkClient {
             .call()
             .map_err(|error| to_api_error(error, "CHZZK unofficial live-detail request failed"))?
             .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK unofficial live-detail parse failed: {error}")))?;
+            .map_err(|error| {
+                ChzzkApiError(format!(
+                    "CHZZK unofficial live-detail parse failed: {error}"
+                ))
+            })?;
 
         debug(format!(
             "CHZZK unofficial response: method=GET endpoint={} body={}",
@@ -451,8 +472,11 @@ impl ChzzkClient {
 
         validate_api_code(&root)?;
         let payload = extract_payload(&root);
-        let thumbnail = extract_live_item_thumbnail_url(payload)
-            .or_else(|| payload.get("live").and_then(extract_live_item_thumbnail_url));
+        let thumbnail = extract_live_item_thumbnail_url(payload).or_else(|| {
+            payload
+                .get("live")
+                .and_then(extract_live_item_thumbnail_url)
+        });
 
         debug(format!(
             "CHZZK unofficial live-detail parsed: channel_id={}, has_thumbnail={}",
@@ -543,7 +567,10 @@ impl ChzzkClient {
 
         let mut body = serde_json::Map::new();
         body.insert("clientId".to_string(), Value::String(client_id.to_string()));
-        body.insert("clientSecret".to_string(), Value::String(client_secret.to_string()));
+        body.insert(
+            "clientSecret".to_string(),
+            Value::String(client_secret.to_string()),
+        );
         body.insert("token".to_string(), Value::String(token_val.to_string()));
 
         let _root = self.post_json(&endpoint, Value::Object(body))?;
@@ -593,13 +620,11 @@ fn to_api_error(error: ureq::Error, context: &str) -> ChzzkApiError {
 
 fn extract_error_detail(raw_body: &str) -> String {
     match serde_json::from_str::<Value>(raw_body) {
-        Ok(value) => {
-            value
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or(raw_body)
-                .to_string()
-        }
+        Ok(value) => value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or(raw_body)
+            .to_string(),
         Err(_) => raw_body.to_string(),
     }
 }
@@ -616,10 +641,16 @@ fn mask_secret(value: &str) -> String {
     }
 
     let prefix: String = chars.iter().take(3).collect();
-    let suffix: String = chars.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev().collect();
+    let suffix: String = chars
+        .iter()
+        .rev()
+        .take(2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{prefix}{MASKED}{suffix}")
 }
-
 
 fn mask_json_value(key: Option<&str>, value: &Value) -> Value {
     match value {
@@ -633,12 +664,20 @@ fn mask_json_value(key: Option<&str>, value: &Value) -> Value {
                         masked.insert(child_key.clone(), Value::String(MASKED.to_string()));
                     }
                 } else {
-                    masked.insert(child_key.clone(), mask_json_value(Some(child_key), child_value));
+                    masked.insert(
+                        child_key.clone(),
+                        mask_json_value(Some(child_key), child_value),
+                    );
                 }
             }
             Value::Object(masked)
         }
-        Value::Array(items) => Value::Array(items.iter().map(|item| mask_json_value(key, item)).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| mask_json_value(key, item))
+                .collect(),
+        ),
         Value::String(text) => {
             if key.is_some_and(is_sensitive_key) {
                 Value::String(mask_secret(text))
@@ -665,7 +704,10 @@ fn validate_api_code(root: &Value) -> Result<(), ChzzkApiError> {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("unknown error");
-    Err(ChzzkApiError(format!("CHZZK API error: code={}, message={}", code, message)))
+    Err(ChzzkApiError(format!(
+        "CHZZK API error: code={}, message={}",
+        code, message
+    )))
 }
 
 fn extract_string(value: &Value, key: &str) -> Option<String> {
@@ -699,7 +741,12 @@ fn extract_access_token(root: &Value) -> Result<String, ChzzkApiError> {
     let payload = extract_payload(root);
     extract_string(payload, "accessToken")
         .or_else(|| extract_string(payload, "access_token"))
-        .ok_or_else(|| ChzzkApiError(format!("CHZZK token response missing accessToken: {}", root)))
+        .ok_or_else(|| {
+            ChzzkApiError(format!(
+                "CHZZK token response missing accessToken: {}",
+                root
+            ))
+        })
 }
 
 fn extract_live_item_thumbnail_url(item: &Value) -> Option<String> {
@@ -712,7 +759,10 @@ fn extract_live_item_thumbnail_url(item: &Value) -> Option<String> {
         .or_else(|| extract_string(item, "live_thumbnail_image_url"))
         .or_else(|| extract_string(item, "live_image_url"))
         .or_else(|| extract_string(item, "default_thumbnail_image_url"))
-        .or_else(|| item.get("liveImage").and_then(|value| extract_string(value, "url")))
+        .or_else(|| {
+            item.get("liveImage")
+                .and_then(|value| extract_string(value, "url"))
+        })
 }
 
 fn simple_url_encode(value: &str) -> String {
@@ -749,5 +799,3 @@ fn is_sensitive_key(key: &str) -> bool {
             | "refresh-token"
     )
 }
-
-

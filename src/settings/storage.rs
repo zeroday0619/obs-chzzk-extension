@@ -14,7 +14,9 @@ fn settings_config_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Some(appdata) = env::var_os("APPDATA") {
-            return PathBuf::from(appdata).join("obs-studio").join("plugin_config");
+            return PathBuf::from(appdata)
+                .join("obs-studio")
+                .join("plugin_config");
         }
         if let Some(userprofile) = env::var_os("USERPROFILE") {
             return PathBuf::from(userprofile)
@@ -39,7 +41,9 @@ fn settings_config_dir() -> PathBuf {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Some(config_home) = env::var_os("XDG_CONFIG_HOME") {
-            return PathBuf::from(config_home).join("obs-studio").join("plugin_config");
+            return PathBuf::from(config_home)
+                .join("obs-studio")
+                .join("plugin_config");
         }
         if let Some(home) = env::var_os("HOME") {
             return PathBuf::from(home)
@@ -74,7 +78,11 @@ fn file_bool_value(root: &Value, key: &str, fallback: bool) -> bool {
             value
                 .as_bool()
                 .or_else(|| value.as_i64().map(|num| num != 0))
-                .or_else(|| value.as_str().map(|text| text.eq_ignore_ascii_case("true") || text == "1"))
+                .or_else(|| {
+                    value
+                        .as_str()
+                        .map(|text| text.eq_ignore_ascii_case("true") || text == "1")
+                })
         })
         .unwrap_or(fallback)
 }
@@ -101,7 +109,11 @@ fn load_settings_from_file() -> Option<PluginSettings> {
             "discord_presence_enabled",
             defaults.discord_presence_enabled,
         ),
-        discord_activity_name: file_value(&root, "discord_activity_name", &defaults.discord_activity_name),
+        discord_activity_name: file_value(
+            &root,
+            "discord_activity_name",
+            &defaults.discord_activity_name,
+        ),
         chzzk_authorization_token: file_value(&root, "chzzk_authorization_token", ""),
         chzzk_auth_status: file_value(&root, "chzzk_auth_status", ""),
     };
@@ -130,15 +142,27 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
     let path = settings_file_path();
     if let Some(parent) = path.parent() {
         if let Err(error) = fs::create_dir_all(parent) {
-            log_error(format!("obs-chzzk-extension: failed to create settings dir: {}", error));
+            log_error(format!(
+                "obs-chzzk-extension: failed to create settings dir: {}",
+                error
+            ));
             return;
         }
     }
 
     let mut root = serde_json::Map::new();
-    root.insert("chzzk_client_id".to_string(), Value::String(settings.chzzk_client_id.clone()));
-    root.insert("chzzk_client_secret".to_string(), Value::String(settings.chzzk_client_secret.clone()));
-    root.insert("chzzk_api_base_url".to_string(), Value::String(settings.chzzk_api_base_url.clone()));
+    root.insert(
+        "chzzk_client_id".to_string(),
+        Value::String(settings.chzzk_client_id.clone()),
+    );
+    root.insert(
+        "chzzk_client_secret".to_string(),
+        Value::String(settings.chzzk_client_secret.clone()),
+    );
+    root.insert(
+        "chzzk_api_base_url".to_string(),
+        Value::String(settings.chzzk_api_base_url.clone()),
+    );
     root.insert(
         "discord_application_id".to_string(),
         Value::String(settings.discord_application_id.clone()),
@@ -147,14 +171,26 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
         "discord_presence_enabled".to_string(),
         Value::Bool(settings.discord_presence_enabled),
     );
-    root.insert("discord_activity_name".to_string(), Value::String(settings.discord_activity_name.clone()));
-    root.insert("chzzk_authorization_token".to_string(), Value::String(settings.chzzk_authorization_token.clone()));
-    root.insert("chzzk_auth_status".to_string(), Value::String(settings.chzzk_auth_status.clone()));
+    root.insert(
+        "discord_activity_name".to_string(),
+        Value::String(settings.discord_activity_name.clone()),
+    );
+    root.insert(
+        "chzzk_authorization_token".to_string(),
+        Value::String(settings.chzzk_authorization_token.clone()),
+    );
+    root.insert(
+        "chzzk_auth_status".to_string(),
+        Value::String(settings.chzzk_auth_status.clone()),
+    );
 
     let rendered = match serde_json::to_string_pretty(&Value::Object(root)) {
         Ok(text) => text,
         Err(error) => {
-            log_error(format!("obs-chzzk-extension: failed to encode settings: {}", error));
+            log_error(format!(
+                "obs-chzzk-extension: failed to encode settings: {}",
+                error
+            ));
             return;
         }
     };
@@ -163,7 +199,10 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
     match create_private_file(&temp_path).and_then(|mut file| file.write_all(rendered.as_bytes())) {
         Ok(()) => {
             if let Err(error) = fs::rename(&temp_path, &path) {
-                log_error(format!("obs-chzzk-extension: failed to move settings file: {}", error));
+                log_error(format!(
+                    "obs-chzzk-extension: failed to move settings file: {}",
+                    error
+                ));
                 let _ = fs::remove_file(&temp_path);
             } else {
                 #[cfg(unix)]
@@ -172,7 +211,10 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
             }
         }
         Err(error) => {
-            log_error(format!("obs-chzzk-extension: failed to write settings file: {}", error));
+            log_error(format!(
+                "obs-chzzk-extension: failed to write settings file: {}",
+                error
+            ));
             let _ = fs::remove_file(&temp_path);
         }
     }

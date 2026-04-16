@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::presence::{
-    build_clear_activity_payload, build_handshake_payload, build_set_activity_payload, PresenceCommand,
-    PresenceConfig,
-};
 use crate::logging::{debug, error as log_error, info};
+use crate::presence::{
+    build_clear_activity_payload, build_handshake_payload, build_set_activity_payload,
+    PresenceCommand, PresenceConfig,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -77,20 +77,31 @@ fn connect_to_discord() -> io::Result<UnixStream> {
     let mut last_error: Option<io::Error> = None;
 
     for candidate in ipc_socket_candidates() {
-        debug(format!("trying Discord IPC socket: {}", candidate.display()));
+        debug(format!(
+            "trying Discord IPC socket: {}",
+            candidate.display()
+        ));
         match UnixStream::connect(&candidate) {
             Ok(stream) => {
-                info(format!("connected to Discord IPC socket: {}", candidate.display()));
+                info(format!(
+                    "connected to Discord IPC socket: {}",
+                    candidate.display()
+                ));
                 return Ok(stream);
             }
             Err(error) => last_error = Some(error),
         }
     }
 
-    Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "discord ipc socket not found")))
+    Err(last_error
+        .unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "discord ipc socket not found")))
 }
 
-fn write_ipc_frame(stream: &mut UnixStream, opcode: DiscordIpcOpcode, payload: &[u8]) -> io::Result<()> {
+fn write_ipc_frame(
+    stream: &mut UnixStream,
+    opcode: DiscordIpcOpcode,
+    payload: &[u8],
+) -> io::Result<()> {
     let payload_bytes = payload;
     let mut header = [0u8; 8];
 
@@ -114,8 +125,12 @@ fn read_ipc_frame(stream: &mut UnixStream) -> io::Result<(DiscordIpcOpcode, Vec<
     stream.read_exact(&mut header)?;
 
     let opcode_raw = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
-    let opcode = DiscordIpcOpcode::from_u32(opcode_raw)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("unknown opcode: {}", opcode_raw)))?;
+    let opcode = DiscordIpcOpcode::from_u32(opcode_raw).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unknown opcode: {}", opcode_raw),
+        )
+    })?;
     let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
 
     let mut payload = vec![0u8; length];
@@ -169,7 +184,11 @@ impl DiscordIpcClient {
 
     fn handshake(&mut self, application_id: &str) -> io::Result<()> {
         let payload = build_handshake_payload(application_id);
-        write_ipc_frame(&mut self.stream, DiscordIpcOpcode::Handshake, payload.as_bytes())?;
+        write_ipc_frame(
+            &mut self.stream,
+            DiscordIpcOpcode::Handshake,
+            payload.as_bytes(),
+        )?;
         debug("Discord Rich Presence handshake request sent");
 
         let (opcode, payload) = read_ipc_frame(&mut self.stream)?;
@@ -190,7 +209,10 @@ impl DiscordIpcClient {
         if let Some(json) = parse_json_payload(&payload) {
             let cmd = json.get("cmd").and_then(Value::as_str).unwrap_or_default();
             let evt = json.get("evt").and_then(Value::as_str).unwrap_or_default();
-            debug(format!("Discord RPC handshake frame received: cmd='{}', evt='{}'", cmd, evt));
+            debug(format!(
+                "Discord RPC handshake frame received: cmd='{}', evt='{}'",
+                cmd, evt
+            ));
         }
 
         info("Discord Rich Presence handshake established");
@@ -198,7 +220,11 @@ impl DiscordIpcClient {
     }
 
     fn set_activity(&mut self, payload: &str) -> io::Result<()> {
-        write_ipc_frame(&mut self.stream, DiscordIpcOpcode::Frame, payload.as_bytes())
+        write_ipc_frame(
+            &mut self.stream,
+            DiscordIpcOpcode::Frame,
+            payload.as_bytes(),
+        )
     }
 
     fn clear_activity(&mut self) {
@@ -218,7 +244,10 @@ impl DiscordIpcClient {
                 if let Some(json) = parse_json_payload(&payload) {
                     let cmd = json.get("cmd").and_then(Value::as_str).unwrap_or_default();
                     let evt = json.get("evt").and_then(Value::as_str).unwrap_or_default();
-                    debug(format!("Discord RPC frame received: cmd='{}', evt='{}'", cmd, evt));
+                    debug(format!(
+                        "Discord RPC frame received: cmd='{}', evt='{}'",
+                        cmd, evt
+                    ));
                 }
 
                 Ok(IpcEvent::Other)
@@ -245,7 +274,10 @@ pub(crate) fn run_presence_worker(
     let mut client = match DiscordIpcClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            log_error(format!("Discord Rich Presence connection failed: {}", error));
+            log_error(format!(
+                "Discord Rich Presence connection failed: {}",
+                error
+            ));
             return;
         }
     };
@@ -256,7 +288,10 @@ pub(crate) fn run_presence_worker(
     }
 
     if let Err(error) = client.set_activity(&build_set_activity_payload(&initial_config)) {
-        log_error(format!("Discord Rich Presence activity update failed: {}", error));
+        log_error(format!(
+            "Discord Rich Presence activity update failed: {}",
+            error
+        ));
         return;
     }
     info("Discord Rich Presence activity set");
@@ -294,7 +329,9 @@ pub(crate) fn run_presence_worker(
                 break;
             }
             Ok(IpcEvent::Other) => {}
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock || error.kind() == io::ErrorKind::TimedOut => {}
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock
+                    || error.kind() == io::ErrorKind::TimedOut => {}
             Err(error) => {
                 log_error(format!("Discord Rich Presence read failed: {}", error));
                 break;
