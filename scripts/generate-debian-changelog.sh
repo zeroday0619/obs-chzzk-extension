@@ -47,6 +47,22 @@ extract_cargo_value() {
   sed -nE "s/^${key}[[:space:]]*=[[:space:]]*\"([^\"]+)\"/\1/p" "${REPO_ROOT}/Cargo.toml" | head -n 1
 }
 
+extract_debian_maintainer_field() {
+  sed -nE 's/^Maintainer:[[:space:]]*(.+)$/\1/p' "${REPO_ROOT}/debian/control" | head -n 1
+}
+
+extract_debian_maintainer_name() {
+  local maintainer_field
+  maintainer_field="$(extract_debian_maintainer_field)"
+  sed -nE 's/^[[:space:]]*([^<]+)[[:space:]]*<[^>]+>[[:space:]]*$/\1/p' <<<"${maintainer_field}" | head -n 1
+}
+
+extract_debian_maintainer_email() {
+  local maintainer_field
+  maintainer_field="$(extract_debian_maintainer_field)"
+  sed -nE 's/^[[:space:]]*[^<]+<([^>]+)>[[:space:]]*$/\1/p' <<<"${maintainer_field}" | head -n 1
+}
+
 default_since_ref() {
   if git -C "${REPO_ROOT}" describe --tags --abbrev=0 >/dev/null 2>&1; then
     git -C "${REPO_ROOT}" describe --tags --abbrev=0
@@ -62,6 +78,10 @@ sanitize_subject() {
   subject="${subject%"${subject##*[![:space:]]}"}"
   subject="${subject%$'\r'}"
   printf '%s' "$subject"
+}
+
+git_has_commit() {
+  git -C "${REPO_ROOT}" rev-parse --verify HEAD^{commit} >/dev/null 2>&1
 }
 
 main() {
@@ -81,8 +101,13 @@ main() {
   local urgency="medium"
   local since_ref=""
   local until_ref="HEAD"
-  local maintainer="${DEBFULLNAME:-$(git -C "${REPO_ROOT}" config user.name || true)}"
-  local email="${DEBEMAIL:-$(git -C "${REPO_ROOT}" config user.email || true)}"
+  local git_maintainer git_email debian_maintainer debian_email
+  git_maintainer="$(git -C "${REPO_ROOT}" config user.name || true)"
+  git_email="$(git -C "${REPO_ROOT}" config user.email || true)"
+  debian_maintainer="$(extract_debian_maintainer_name)"
+  debian_email="$(extract_debian_maintainer_email)"
+  local maintainer="${DEBFULLNAME:-${git_maintainer:-${debian_maintainer}}}"
+  local email="${DEBEMAIL:-${git_email:-${debian_email}}}"
   local output="${REPO_ROOT}/debian/changelog"
   local append_existing=0
   local include_merges=0
@@ -139,28 +164,41 @@ main() {
     esac
   done
 
-  [[ -n "${maintainer}" ]] || die "maintainer name is empty; set git user.name or DEBFULLNAME"
-  [[ -n "${email}" ]] || die "maintainer email is empty; set git user.email or DEBEMAIL"
+  [[ -n "${maintainer}" ]] || die "maintainer name is empty; set git user.name, DEBFULLNAME, or debian/control Maintainer"
+  [[ -n "${email}" ]] || die "maintainer email is empty; set git user.email, DEBEMAIL, or debian/control Maintainer"
 
-  if [[ -z "${since_ref}" ]]; then
-    since_ref="$(default_since_ref)"
+  local use_git_history=1
+  if ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    use_git_history=0
+    log "repository is not a git work tree; generating changelog without commit subjects"
+  elif ! git_has_commit; then
+    use_git_history=0
+    log "git HEAD is unavailable; generating changelog without commit subjects"
   fi
 
-  git -C "${REPO_ROOT}" rev-parse --verify "${until_ref}^{commit}" >/dev/null 2>&1 || die "invalid until ref: ${until_ref}"
-  git -C "${REPO_ROOT}" rev-parse --verify "${since_ref}^{commit}" >/dev/null 2>&1 || die "invalid since ref: ${since_ref}"
+  local range=""
+  local -a subjects=()
+  if [[ "${use_git_history}" -eq 1 ]]; then
+    if [[ -z "${since_ref}" ]]; then
+      since_ref="$(default_since_ref)"
+    fi
 
-  local range="${since_ref}..${until_ref}"
-  local log_args=( -C "${REPO_ROOT}" log --format=%s )
-  if [[ "${include_merges}" -eq 0 ]]; then
-    log_args+=( --no-merges )
-  fi
-  log_args+=( "${range}" )
+    git -C "${REPO_ROOT}" rev-parse --verify "${until_ref}^{commit}" >/dev/null 2>&1 || die "invalid until ref: ${until_ref}"
+    git -C "${REPO_ROOT}" rev-parse --verify "${since_ref}^{commit}" >/dev/null 2>&1 || die "invalid since ref: ${since_ref}"
 
-  mapfile -t subjects < <(git "${log_args[@]}")
+    range="${since_ref}..${until_ref}"
+    local log_args=( -C "${REPO_ROOT}" log --format=%s )
+    if [[ "${include_merges}" -eq 0 ]]; then
+      log_args+=( --no-merges )
+    fi
+    log_args+=( "${range}" )
 
-  if [[ "${#subjects[@]}" -eq 0 ]]; then
-    log "no commits found in ${range}; using ${until_ref} subject as fallback"
-    mapfile -t subjects < <(git -C "${REPO_ROOT}" log -1 --format=%s "${until_ref}")
+    mapfile -t subjects < <(git "${log_args[@]}")
+
+    if [[ "${#subjects[@]}" -eq 0 ]]; then
+      log "no commits found in ${range}; using ${until_ref} subject as fallback"
+      mapfile -t subjects < <(git -C "${REPO_ROOT}" log -1 --format=%s "${until_ref}")
+    fi
   fi
 
   mkdir -p "$(dirname "${output}")"
@@ -194,7 +232,11 @@ main() {
     fi
   } > "${output}"
 
-  log "wrote ${output} from git range ${range}"
+  if [[ "${use_git_history}" -eq 1 ]]; then
+    log "wrote ${output} from git range ${range}"
+  else
+    log "wrote ${output} without git history"
+  fi
 }
 
 main "$@"

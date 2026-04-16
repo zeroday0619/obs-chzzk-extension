@@ -1,0 +1,6 @@
+.git
+target
+*.deb
+*.build
+*.buildinfo
+*.changes

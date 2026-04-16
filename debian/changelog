@@ -1,5 +1,12 @@
 obs-chzzk-extension (0.1.0-1) unstable; urgency=medium
 
-  * Initial Debian packaging.
+  * packaging: add Debian packaging support
+  * refactor: migrate live dock to CXX-Qt on Qt 6
+  * Update GitHub Sponsors username in FUNDING.yml
+  * Add poster image support to live‑settings API
+  * Add tags support to live settings
+  * Add preview section to README files
+  * Add CHZZK Live‑Editor dock to OBS plugin
+  * Modify copyright notice in LICENSE file
 
- -- Euiseo Cha <escha@zeroday0619.dev>  Thu, 16 Apr 2026 20:00:00 +0900
+ -- Euiseo Cha <escha@zeroday0619.dev>  Fri, 17 Apr 2026 00:07:20 +0900

@@ -34,6 +34,8 @@ target/
 .codex
 
 ### Debian packaging artifacts ###
+dist/
+dist/*
 debian/.debhelper/
 debian/debhelper-build-stamp
 debian/files

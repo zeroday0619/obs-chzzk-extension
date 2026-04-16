@@ -21,6 +21,7 @@ Options:
   --urgency LEVEL            Pass --urgency to changelog generator
   --skip-tests               Disable tests by exporting DEB_BUILD_OPTIONS=nocheck
   --clean                    Remove previous top-level .deb artifacts before building
+  --artifacts-dir DIR        Copy generated package artifacts into DIR after build
   --help                     Show this help
 
 Defaults:
@@ -48,6 +49,7 @@ main() {
   local append_existing=0
   local clean_outputs=0
   local skip_tests=0
+  local artifacts_dir=""
   local -a changelog_args=()
   local -a build_args=( -us -uc -b )
 
@@ -72,6 +74,10 @@ main() {
       --clean)
         clean_outputs=1
         shift
+        ;;
+      --artifacts-dir)
+        artifacts_dir="${2:?missing value for --artifacts-dir}"
+        shift 2
         ;;
       --help)
         usage
@@ -124,6 +130,33 @@ main() {
     cd "${REPO_ROOT}"
     dpkg-buildpackage "${build_args[@]}"
   )
+
+  if [[ -n "${artifacts_dir}" ]]; then
+    local artifacts_target
+    if [[ "${artifacts_dir}" = /* ]]; then
+      artifacts_target="${artifacts_dir}"
+    else
+      artifacts_target="${REPO_ROOT}/${artifacts_dir}"
+    fi
+
+    mkdir -p "${artifacts_target}"
+
+    shopt -s nullglob
+    local -a generated_artifacts=(
+      "${REPO_ROOT}/../"*.deb
+      "${REPO_ROOT}/../"*.buildinfo
+      "${REPO_ROOT}/../"*.changes
+      "${REPO_ROOT}/../"*.build
+    )
+    shopt -u nullglob
+
+    if [[ "${#generated_artifacts[@]}" -eq 0 ]]; then
+      die "no package artifacts found to copy into ${artifacts_target}"
+    fi
+
+    log "copying package artifacts into ${artifacts_target}"
+    cp -f "${generated_artifacts[@]}" "${artifacts_target}/"
+  fi
 }
 
 main "$@"

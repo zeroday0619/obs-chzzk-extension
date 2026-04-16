@@ -34,6 +34,7 @@ sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-p
 ## Debian Packaging
 - Debian packaging files are stored in `debian/`.
 - Packaging helper scripts are stored in `scripts/`.
+- A Debian packaging container is provided in `docker/debian-package/`.
 
 ```bash
 # Generate debian/changelog from git commits
@@ -41,11 +42,39 @@ scripts/generate-debian-changelog.sh --since-ref <git-tag-or-commit>
 
 # Build Debian packages
 scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean
+
+# Build Debian packages and collect them in ./dist
+scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean --artifacts-dir dist
 ```
 
 - `scripts/generate-debian-changelog.sh` reads git commit subjects and writes a Debian-style changelog entry.
 - `scripts/build-deb.sh` wraps `dpkg-buildpackage` and can regenerate the changelog before building.
-- Generated package artifacts such as `.deb`, `.buildinfo`, and `.changes` are written to the parent directory of the repository.
+- Generated package artifacts such as `.deb`, `.buildinfo`, and `.changes` are written to the parent directory of the repository by default.
+- Use `--artifacts-dir <dir>` to copy generated artifacts into a directory inside the repository, which is especially useful in Docker.
+
+### Build In Docker
+```bash
+# Build the packaging image
+docker build -f docker/debian-package/Dockerfile -t obs-chzzk-extension-deb .
+
+# Build Debian packages inside the container
+docker run --rm \
+  -v "$PWD":/work \
+  -w /work \
+  obs-chzzk-extension-deb \
+  scripts/build-deb.sh --clean --artifacts-dir dist
+
+# Example: regenerate changelog before building
+docker run --rm \
+  -v "$PWD":/work \
+  -w /work \
+  obs-chzzk-extension-deb \
+  scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean --artifacts-dir dist
+```
+
+- The container installs the Debian packaging toolchain, Rust, and Qt 6 build dependencies.
+- The container installs Rust `1.94.1` via `rustup`, matching the recommended toolchain for this project.
+- With `--artifacts-dir dist`, copied package artifacts will be available in `./dist` on the host after the container exits.
 
 ## Usage
 1. Open OBS Studio.
