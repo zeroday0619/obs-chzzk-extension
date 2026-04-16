@@ -1,7 +1,7 @@
 # OBS Chzzk Extension
 [NAVER Chzzk](https://chzzk.naver.com) の OBS Studio 拡張機能
 
-[English](README.md) | [한국어](README.ko.md)
+[English](README.md) | [한국어](README.ko.md) | [繁體中文](README.zh-TW.md)
 
 ## プレビュー
 ![プレビュー](public/image/preview-all.png)
@@ -30,6 +30,51 @@ make release
 # OBS Chzzk Extension をインストール
 sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-plugins/
 ```
+
+## Debian パッケージング
+- Debian パッケージング用ファイルは `debian/` ディレクトリにあります。
+- パッケージング補助スクリプトは `scripts/` ディレクトリにあります。
+- Debian パッケージング用コンテナは `docker/debian-package/` ディレクトリにあります。
+
+```bash
+# git コミットログから debian/changelog を生成
+scripts/generate-debian-changelog.sh --since-ref <git-tag-or-commit>
+
+# Debian パッケージをビルド
+scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean
+
+# Debian パッケージをビルドして ./dist に集約
+scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean --artifacts-dir dist
+```
+
+- `scripts/generate-debian-changelog.sh` は Git のコミット subject を読み取り、Debian 形式の changelog エントリを生成します。
+- `scripts/build-deb.sh` は `dpkg-buildpackage` をラップし、ビルド前に changelog を再生成できます。
+- 生成された `.deb`、`.buildinfo`、`.changes` などのパッケージ成果物は、デフォルトではリポジトリの親ディレクトリに出力されます。
+- Docker のように親ディレクトリが永続化されない環境では、`--artifacts-dir <dir>` オプションでリポジトリ内ディレクトリへ再コピーできます。
+
+### Docker でビルド
+```bash
+# パッケージングイメージをビルド
+docker build -f docker/debian-package/Dockerfile -t obs-chzzk-extension-deb .
+
+# コンテナ内で Debian パッケージをビルド
+docker run --rm \
+  -v "$PWD":/work \
+  -w /work \
+  obs-chzzk-extension-deb \
+  scripts/build-deb.sh --clean --artifacts-dir dist
+
+# 例: ビルド前に changelog を再生成
+docker run --rm \
+  -v "$PWD":/work \
+  -w /work \
+  obs-chzzk-extension-deb \
+  scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean --artifacts-dir dist
+```
+
+- コンテナには Debian パッケージングツール、Rust、Qt 6 のビルド依存関係が含まれます。
+- コンテナには、このプロジェクトの推奨バージョンと同じ Rust `1.94.1` が `rustup` でインストールされます。
+- `--artifacts-dir dist` を併用すると、コンテナ終了後もホスト側の `./dist` ディレクトリでパッケージ成果物を確認できます。
 
 ## 使い方
 1. OBS Studio を起動します。

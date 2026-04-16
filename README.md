@@ -1,7 +1,7 @@
 # OBS Chzzk Extension
 [NAVER Chzzk](https://chzzk.naver.com) OBS Studio Extension
 
-[한국어](README.ko.md) | [日本語](README.ja.md)
+[한국어](README.ko.md) | [日本語](README.ja.md) | [繁體中文](README.zh-TW.md)
 
 ## Preview
 ![Preview](public/image/preview-all.png)
