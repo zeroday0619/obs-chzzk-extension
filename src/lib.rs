@@ -11,6 +11,8 @@ mod chzzk;
 #[cfg(unix)]
 mod discord;
 mod logging;
+#[path = "qt-rs/notification_popup.rs"]
+mod notification_popup;
 #[cfg(unix)]
 mod presence;
 #[path = "qt-rs/live_dock.rs"]
