@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export QT_VERSION_MAJOR = 6
+export RUSTUP_TOOLCHAIN = stable
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+	cargo clean
+
+override_dh_auto_build:
+	cargo build --release
+
+override_dh_auto_test:
+	cargo test --release
+
+override_dh_auto_install:
+	install -Dm755 target/release/libobs_chzzk_extension.so \
+		$(CURDIR)/debian/obs-chzzk-extension/usr/lib/$(DEB_HOST_MULTIARCH)/obs-plugins/libobs_chzzk_extension.so

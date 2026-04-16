@@ -1,0 +1,27 @@
+Source: obs-chzzk-extension
+Section: video
+Priority: optional
+Maintainer: Euiseo Cha <escha@zeroday0619.dev>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo:native,
+ g++,
+ make,
+ pkgconf,
+ qt6-base-dev,
+ rustc:native
+Standards-Version: 4.7.0
+Homepage: https://github.com/zeroday0619/obs-chzzk-extension
+Rules-Requires-Root: no
+
+Package: obs-chzzk-extension
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ obs-studio
+Description: OBS Studio extension for NAVER Chzzk
+ OBS Chzzk Extension adds NAVER Chzzk integration to OBS Studio.
+ .
+ It provides a dock for editing live stream metadata and includes optional
+ Discord Rich Presence support for live broadcasts.

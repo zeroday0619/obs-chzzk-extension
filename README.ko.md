@@ -31,6 +31,22 @@ make release
 sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-plugins/
 ```
 
+## 데비안 패키징
+- 데비안 패키징 파일은 `debian/` 디렉터리에 있습니다.
+- 패키징 보조 스크립트는 `scripts/` 디렉터리에 있습니다.
+
+```bash
+# git 커밋 로그 기반으로 debian/changelog 생성
+scripts/generate-debian-changelog.sh --since-ref <git-tag-or-commit>
+
+# 데비안 패키지 빌드
+scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean
+```
+
+- `scripts/generate-debian-changelog.sh` 는 Git 커밋 subject를 읽어 Debian 형식의 changelog 항목을 생성합니다.
+- `scripts/build-deb.sh` 는 `dpkg-buildpackage` 를 감싸며, 빌드 전에 changelog를 다시 생성할 수 있습니다.
+- 생성된 `.deb`, `.buildinfo`, `.changes` 같은 패키지 산출물은 저장소의 상위 디렉터리에 기록됩니다.
+
 ## 사용 방법
 1. OBS Studio를 실행합니다.
 2. `Tools` > `OBS Chzzk Extension Settings`로 이동합니다.

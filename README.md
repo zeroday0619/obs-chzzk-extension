@@ -31,6 +31,22 @@ make release
 sudo cp target/release/libobs_chzzk_extension.so /usr/lib/x86_64-linux-gnu/obs-plugins/
 ```
 
+## Debian Packaging
+- Debian packaging files are stored in `debian/`.
+- Packaging helper scripts are stored in `scripts/`.
+
+```bash
+# Generate debian/changelog from git commits
+scripts/generate-debian-changelog.sh --since-ref <git-tag-or-commit>
+
+# Build Debian packages
+scripts/build-deb.sh --generate-changelog --since-ref <git-tag-or-commit> --clean
+```
+
+- `scripts/generate-debian-changelog.sh` reads git commit subjects and writes a Debian-style changelog entry.
+- `scripts/build-deb.sh` wraps `dpkg-buildpackage` and can regenerate the changelog before building.
+- Generated package artifacts such as `.deb`, `.buildinfo`, and `.changes` are written to the parent directory of the repository.
+
 ## Usage
 1. Open OBS Studio.
 2. Go to `Tools` > `OBS Chzzk Extension Settings`.

@@ -1,0 +1,5 @@
+obs-chzzk-extension (0.1.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Euiseo Cha <escha@zeroday0619.dev>  Thu, 16 Apr 2026 20:00:00 +0900
