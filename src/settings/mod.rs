@@ -114,29 +114,29 @@ fn update_source_text_fields(fields: &[(&'static [u8], &str)]) -> bool {
     true
 }
 
-#[derive(Default)]
-struct LiveDockCategoryEntry {
-    category_type: String,
-    category_id: String,
-    category_name: String,
-    poster_image_url: Option<String>,
+#[derive(Clone, Default)]
+pub(crate) struct LiveDockCategoryEntry {
+    pub(crate) category_type: String,
+    pub(crate) category_id: String,
+    pub(crate) category_name: String,
+    pub(crate) poster_image_url: Option<String>,
 }
 
-#[derive(Default)]
-struct LiveDockResponse {
-    ok: bool,
-    status: String,
-    live_title: Option<String>,
-    category_type: Option<String>,
-    category_id: Option<String>,
-    category_name: Option<String>,
-    poster_image_url: Option<String>,
-    tags: Option<Vec<String>>,
-    categories: Option<Vec<LiveDockCategoryEntry>>,
+#[derive(Clone, Default)]
+pub(crate) struct LiveDockResponse {
+    pub(crate) ok: bool,
+    pub(crate) status: String,
+    pub(crate) live_title: Option<String>,
+    pub(crate) category_type: Option<String>,
+    pub(crate) category_id: Option<String>,
+    pub(crate) category_name: Option<String>,
+    pub(crate) poster_image_url: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
+    pub(crate) categories: Option<Vec<LiveDockCategoryEntry>>,
 }
 
 impl LiveDockResponse {
-    fn success(status: &str) -> Self {
+    pub(crate) fn success(status: &str) -> Self {
         Self {
             ok: true,
             status: status.to_string(),
@@ -144,7 +144,7 @@ impl LiveDockResponse {
         }
     }
 
-    fn error(status: String) -> Self {
+    pub(crate) fn error(status: String) -> Self {
         Self {
             ok: false,
             status,
@@ -240,7 +240,7 @@ fn response_json_ptr(response: LiveDockResponse) -> *mut c_char {
     text.into_raw()
 }
 
-fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> {
+pub(crate) fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> {
     let settings = current_settings();
     let access_token = settings.chzzk_authorization_token.trim();
     if access_token.is_empty() {
@@ -350,7 +350,7 @@ fn resolve_current_category_thumbnail(
     None
 }
 
-fn search_category_response(query: &str) -> Result<LiveDockResponse, String> {
+pub(crate) fn search_category_response(query: &str) -> Result<LiveDockResponse, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("Category Search Query is empty".to_string());
@@ -413,7 +413,7 @@ fn parse_tags_input(raw: &str) -> Vec<String> {
     tags
 }
 
-fn apply_live_update_response(
+pub(crate) fn apply_live_update_response(
     live_title: &str,
     category_type: &str,
     category_id: &str,
@@ -469,7 +469,7 @@ fn apply_live_update_response(
     }
 }
 
-fn clear_live_tags_response() -> Result<LiveDockResponse, String> {
+pub(crate) fn clear_live_tags_response() -> Result<LiveDockResponse, String> {
     let settings = current_settings();
     let access_token = settings.chzzk_authorization_token.trim();
     if access_token.is_empty() {
@@ -495,7 +495,7 @@ fn clear_live_tags_response() -> Result<LiveDockResponse, String> {
     }
 }
 
-fn clear_live_category_response() -> Result<LiveDockResponse, String> {
+pub(crate) fn clear_live_category_response() -> Result<LiveDockResponse, String> {
     let settings = current_settings();
     let access_token = settings.chzzk_authorization_token.trim();
     if access_token.is_empty() {

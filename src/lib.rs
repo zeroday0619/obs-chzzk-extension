@@ -13,6 +13,8 @@ mod discord;
 mod logging;
 #[cfg(unix)]
 mod presence;
+#[path = "qt-rs/live_dock.rs"]
+mod qt_bridge;
 mod settings;
 
 #[cfg(unix)]

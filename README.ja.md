@@ -10,6 +10,13 @@
 - (推奨 / 動作確認済み) OBS Studio - 32.1.1 以上
 - (推奨 / 動作確認済み) Rust コンパイラ - 1.94.1
 - (推奨) Linux - Debian 13 / Ubuntu 24.04 LTS / Fedora 43 / その他の新しいディストリビューション
+- `pkg-config` で検出できる Qt 6 開発パッケージ
+  - Debian / Ubuntu: `qt6-base-dev`
+  - Fedora: `qt6-qtbase-devel`
+
+## ビルドに関する注意
+- このプロジェクトは Qt 6 のみを対象にビルドします。
+- 実行時も OBS Studio 本体とこのプラグインで同じ Qt メジャーバージョンを使用する必要があります。
 
 ## インストール
 ```bash

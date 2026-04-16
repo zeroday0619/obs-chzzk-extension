@@ -10,6 +10,13 @@
 - (권장 / 테스트 완료) OBS Studio - 32.1.1 이상
 - (권장 / 테스트 완료) Rust 컴파일러 - 1.94.1
 - (권장) Linux - Debian 13 / Ubuntu 24.04 LTS / Fedora 43 / 기타 최신 배포판
+- `pkg-config`로 찾을 수 있는 Qt 6 개발 패키지
+  - Debian / Ubuntu: `qt6-base-dev`
+  - Fedora: `qt6-qtbase-devel`
+
+## 빌드 참고
+- 이 프로젝트는 이제 Qt 6만 대상으로 빌드합니다.
+- 런타임에서도 OBS Studio와 이 플러그인이 같은 Qt 메이저 버전을 사용해야 합니다.
 
 ## 설치
 ```bash
