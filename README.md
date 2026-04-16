@@ -10,6 +10,13 @@
 - (Recommended / Tested) OBS Studio - 32.1.1 or higher
 - (Recommended / Tested) Rust Compiler - 1.94.1
 - (Recommended) Linux - Debian 13 / Ubuntu 24.04 LTS / Fedora 43 / etc... more recent distribution
+- Qt 6 development packages with `pkg-config` support
+  - Debian / Ubuntu: `qt6-base-dev`
+  - Fedora: `qt6-qtbase-devel`
+
+## Build Notes
+- This project now builds against Qt 6 only.
+- The OBS Studio binary and this plugin should use the same Qt major version at runtime.
 
 ## Installation
 ```bash
