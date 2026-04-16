@@ -14,12 +14,12 @@ mod storage;
 
 use constants::{
     KEY_CHZZK_API_BASE_URL, KEY_CHZZK_AUTHORIZATION_TOKEN, KEY_CHZZK_AUTH_STATUS,
-    KEY_CHZZK_CLIENT_ID, KEY_CHZZK_CLIENT_SECRET, KEY_DISCORD_ACTIVITY_NAME,
-    KEY_DISCORD_APPLICATION_ID, KEY_DISCORD_PRESENCE_ENABLED, LIVE_DOCK_ID, LIVE_DOCK_TITLE,
-    MENU_TITLE, OBS_GROUP_NORMAL, OBS_SOURCE_TYPE_INPUT, OBS_TEXT_DEFAULT, OBS_TEXT_PASSWORD,
-    SOURCE_ID, SOURCE_NAME,
+    KEY_CHZZK_CLIENT_ID, KEY_CHZZK_CLIENT_SECRET, KEY_CHZZK_STREAM_KEY_STATUS,
+    KEY_DISCORD_ACTIVITY_NAME, KEY_DISCORD_APPLICATION_ID, KEY_DISCORD_PRESENCE_ENABLED,
+    LIVE_DOCK_ID, LIVE_DOCK_TITLE, MENU_TITLE, OBS_GROUP_NORMAL, OBS_SOURCE_TYPE_INPUT,
+    OBS_TEXT_DEFAULT, OBS_TEXT_PASSWORD, SOURCE_ID, SOURCE_NAME,
 };
-use model::sync_auth_status;
+use model::{stream_key_status_for_value, sync_auth_status};
 use oauth::{request_authorization_token, revoke_token};
 use runtime::apply_runtime_settings;
 use storage::{load_profile_settings, persist_settings_to_file};
@@ -624,7 +624,115 @@ fn sync_source_auth_fields(settings: &PluginSettings) {
             settings.chzzk_authorization_token.as_str(),
         ),
         (KEY_CHZZK_AUTH_STATUS, settings.chzzk_auth_status.as_str()),
+        (
+            KEY_CHZZK_STREAM_KEY_STATUS,
+            settings.chzzk_stream_key_status.as_str(),
+        ),
     ]);
+}
+
+fn current_stream_key_status() -> String {
+    let service = unsafe {
+        let raw = obs_frontend_get_streaming_service();
+        if raw.is_null() {
+            core::ptr::null_mut()
+        } else {
+            obs_service_get_ref(raw)
+        }
+    };
+    if service.is_null() {
+        return stream_key_status_for_value("", false);
+    }
+
+    let (service_name, stream_key) = unsafe {
+        let settings = obs_service_get_settings(service);
+        let values = if settings.is_null() {
+            (String::new(), String::new())
+        } else {
+            let values = (
+                obs_data_value(settings, b"service\0"),
+                obs_data_value(settings, b"key\0"),
+            );
+            obs_data_release(settings);
+            values
+        };
+        obs_service_release(service);
+        values
+    };
+
+    stream_key_status_for_value(&stream_key, service_name == "CHZZK")
+}
+
+fn refresh_stream_key_status(settings: &mut PluginSettings) {
+    settings.chzzk_stream_key_status = current_stream_key_status();
+}
+
+fn update_settings_runtime_snapshot(mut settings: PluginSettings) {
+    sync_auth_status(&mut settings);
+    refresh_stream_key_status(&mut settings);
+    apply_runtime_settings(settings.clone());
+    persist_settings_to_file(&settings);
+    sync_source_auth_fields(&settings);
+}
+
+fn set_obs_chzzk_stream_key(stream_key: &str) -> Result<(), String> {
+    let stream_key = stream_key.trim();
+    if stream_key.is_empty() {
+        return Err("CHZZK stream key is empty".to_string());
+    }
+
+    const CHZZK_SERVICE_ID: &str = "rtmp_common";
+    const CHZZK_SERVICE_NAME: &str = "CHZZK";
+    const CHZZK_PROTOCOL: &str = "RTMP";
+    const CHZZK_SERVER: &str = "rtmp://global-rtmp.lip2.navercorp.com:8080/relay";
+    const CHZZK_STREAM_KEY_LINK: &str = "https://studio.chzzk.naver.com/setting";
+
+    let service = unsafe {
+        let raw = obs_frontend_get_streaming_service();
+        if raw.is_null() {
+            core::ptr::null_mut()
+        } else {
+            obs_service_get_ref(raw)
+        }
+    };
+    if service.is_null() {
+        return Err("OBS streaming service is not available".to_string());
+    }
+
+    let result = unsafe {
+        let service_type = ptr_to_string(obs_service_get_type(service));
+        let settings = obs_service_get_settings(service);
+        if settings.is_null() {
+            obs_service_release(service);
+            return Err("Failed to load OBS streaming service settings".to_string());
+        }
+
+        if service_type != CHZZK_SERVICE_ID {
+            obs_service_release(service);
+            obs_data_release(settings);
+            return Err(format!(
+                "OBS streaming service type '{}' is not supported for automatic CHZZK switching",
+                if service_type.is_empty() {
+                    "unset"
+                } else {
+                    service_type.as_str()
+                }
+            ));
+        }
+
+        obs_data_set_value(settings, b"service\0", CHZZK_SERVICE_NAME);
+        obs_data_set_value(settings, b"protocol\0", CHZZK_PROTOCOL);
+        obs_data_set_value(settings, b"server\0", CHZZK_SERVER);
+        obs_data_set_value(settings, b"stream_key_link\0", CHZZK_STREAM_KEY_LINK);
+        obs_data_set_value(settings, b"key\0", stream_key);
+        obs_service_update(service, settings);
+        obs_frontend_save_streaming_service();
+        obs_data_release(settings);
+        obs_service_release(service);
+        Ok(())
+    };
+
+    result
 }
 
 fn settings_from_obs_data(data: *mut c_void) -> PluginSettings {
@@ -658,10 +766,12 @@ fn settings_from_obs_data(data: *mut c_void) -> PluginSettings {
         // Keep auth token/status from runtime snapshot because these fields are not editable in properties UI.
         chzzk_authorization_token: current.chzzk_authorization_token,
         chzzk_auth_status: current.chzzk_auth_status,
+        chzzk_stream_key_status: current.chzzk_stream_key_status,
     };
 
     let mut parsed = parsed;
     sync_auth_status(&mut parsed);
+    refresh_stream_key_status(&mut parsed);
     parsed
 }
 
@@ -732,6 +842,13 @@ unsafe extern "C" fn settings_source_defaults(settings: *mut c_void) {
     if let Some(value) = c_string(&current.chzzk_auth_status) {
         obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_AUTH_STATUS), value.as_ptr());
     }
+    if let Some(value) = c_string(&current.chzzk_stream_key_status) {
+        obs_data_set_default_string(
+            settings,
+            c_char_ptr(KEY_CHZZK_STREAM_KEY_STATUS),
+            value.as_ptr(),
+        );
+    }
 }
 
 unsafe extern "C" fn settings_source_properties(_data: *mut c_void) -> *mut c_void {
@@ -781,6 +898,18 @@ unsafe extern "C" fn settings_source_properties(_data: *mut c_void) -> *mut c_vo
         account_group,
         c_char_ptr(KEY_CHZZK_AUTH_STATUS),
         c_char_ptr(b"Authorization Status\0"),
+        OBS_TEXT_DEFAULT,
+    );
+    obs_properties_add_button(
+        account_group,
+        c_char_ptr(b"chzzk_set_stream_key\0"),
+        c_char_ptr(b"Set CHZZK Stream Key\0"),
+        Some(set_stream_key_button_clicked),
+    );
+    obs_properties_add_text(
+        account_group,
+        c_char_ptr(KEY_CHZZK_STREAM_KEY_STATUS),
+        c_char_ptr(b"CHZZK Stream Key\0"),
         OBS_TEXT_DEFAULT,
     );
     obs_properties_add_group(
@@ -856,10 +985,7 @@ unsafe extern "C" fn oauth_button_clicked(
             info("Successfully obtained access token");
             let mut updated_settings = settings.clone();
             updated_settings.chzzk_authorization_token = token;
-            sync_auth_status(&mut updated_settings);
-            apply_runtime_settings(updated_settings.clone());
-            persist_settings_to_file(&updated_settings);
-            sync_source_auth_fields(&updated_settings);
+            update_settings_runtime_snapshot(updated_settings);
             true
         }
         Err(error) => {
@@ -881,14 +1007,44 @@ unsafe extern "C" fn revoke_button_clicked(
             info("Successfully revoked CHZZK token");
             let mut updated_settings = settings.clone();
             updated_settings.chzzk_authorization_token.clear();
-            sync_auth_status(&mut updated_settings);
-            apply_runtime_settings(updated_settings.clone());
-            persist_settings_to_file(&updated_settings);
-            sync_source_auth_fields(&updated_settings);
+            update_settings_runtime_snapshot(updated_settings);
             true
         }
         Err(error) => {
             log_error(error);
+            false
+        }
+    }
+}
+
+unsafe extern "C" fn set_stream_key_button_clicked(
+    _properties: *mut c_void,
+    _property: *mut c_void,
+) -> bool {
+    info("Set stream key button clicked - fetching CHZZK stream key");
+
+    let settings = current_settings();
+    let access_token = settings.chzzk_authorization_token.trim();
+    if access_token.is_empty() {
+        log_error("CHZZK account is not linked. Run OAuth first.");
+        return false;
+    }
+
+    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
+    match client.fetch_stream_key(access_token) {
+        Ok(response) => match set_obs_chzzk_stream_key(&response.stream_key) {
+            Ok(()) => {
+                info("Successfully updated OBS CHZZK stream key");
+                update_settings_runtime_snapshot(settings);
+                true
+            }
+            Err(error) => {
+                log_error(error);
+                false
+            }
+        },
+        Err(error) => {
+            log_error(format!("Failed to fetch CHZZK stream key: {}", error));
             false
         }
     }
@@ -959,7 +1115,7 @@ fn register_live_editor_dock() {
 pub(crate) fn initialize_gui_settings() {
     info("initializing GUI settings");
     let loaded = load_profile_settings();
-    apply_runtime_settings(loaded);
+    update_settings_runtime_snapshot(loaded);
 
     register_settings_source();
     create_settings_source();
@@ -1062,6 +1218,20 @@ extern "C" {
     fn obs_frontend_remove_dock(id: *const c_char);
 
     fn obs_frontend_open_source_properties(source: *mut c_void);
+
+    fn obs_frontend_get_streaming_service() -> *mut c_void;
+
+    fn obs_frontend_save_streaming_service();
+
+    fn obs_service_get_settings(service: *mut c_void) -> *mut c_void;
+
+    fn obs_service_update(service: *mut c_void, settings: *mut c_void);
+
+    fn obs_service_get_type(service: *mut c_void) -> *const c_char;
+
+    fn obs_service_get_ref(service: *mut c_void) -> *mut c_void;
+
+    fn obs_service_release(service: *mut c_void);
 
     fn obs_chzzk_live_dock_create_widget() -> *mut c_void;
 

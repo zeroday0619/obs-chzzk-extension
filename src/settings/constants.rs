@@ -13,6 +13,7 @@ pub(crate) const KEY_DISCORD_PRESENCE_ENABLED: &[u8] = b"discord_presence_enable
 pub(crate) const KEY_DISCORD_ACTIVITY_NAME: &[u8] = b"discord_activity_name\0";
 pub(crate) const KEY_CHZZK_AUTHORIZATION_TOKEN: &[u8] = b"chzzk_authorization_token\0";
 pub(crate) const KEY_CHZZK_AUTH_STATUS: &[u8] = b"chzzk_auth_status\0";
+pub(crate) const KEY_CHZZK_STREAM_KEY_STATUS: &[u8] = b"chzzk_stream_key_status\0";
 
 pub(crate) const OBS_SOURCE_TYPE_INPUT: i32 = 0;
 pub(crate) const OBS_TEXT_DEFAULT: i32 = 0;

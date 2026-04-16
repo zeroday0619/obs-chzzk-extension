@@ -116,6 +116,7 @@ fn load_settings_from_file() -> Option<PluginSettings> {
         ),
         chzzk_authorization_token: file_value(&root, "chzzk_authorization_token", ""),
         chzzk_auth_status: file_value(&root, "chzzk_auth_status", ""),
+        chzzk_stream_key_status: file_value(&root, "chzzk_stream_key_status", ""),
     };
 
     sync_auth_status(&mut settings);
@@ -182,6 +183,10 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
     root.insert(
         "chzzk_auth_status".to_string(),
         Value::String(settings.chzzk_auth_status.clone()),
+    );
+    root.insert(
+        "chzzk_stream_key_status".to_string(),
+        Value::String(settings.chzzk_stream_key_status.clone()),
     );
 
     let rendered = match serde_json::to_string_pretty(&Value::Object(root)) {

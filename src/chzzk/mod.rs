@@ -54,6 +54,11 @@ pub(crate) struct ChzzkUserChannelInfo {
     pub(crate) channel_name: Option<String>,
 }
 
+#[derive(Clone)]
+pub(crate) struct ChzzkStreamKey {
+    pub(crate) stream_key: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ChzzkApiError(pub(crate) String);
 
@@ -238,6 +243,52 @@ impl ChzzkClient {
             category_name,
             tags,
         })
+    }
+
+    pub(crate) fn fetch_stream_key(
+        &self,
+        access_token: &str,
+    ) -> Result<ChzzkStreamKey, ChzzkApiError> {
+        let access_token = access_token.trim();
+        if access_token.is_empty() {
+            return Err(ChzzkApiError("access_token is required".to_string()));
+        }
+
+        let endpoint = format!("{}/open/v1/streams/key", self.api_base);
+        let authorization = format!("Bearer {}", access_token);
+        let masked_authorization = format!("Bearer {}", mask_secret(access_token));
+
+        debug(format!(
+            "CHZZK API request: method=GET endpoint={} headers={{\"Authorization\":\"{}\",\"Content-Type\":\"application/json\"}}",
+            endpoint, masked_authorization
+        ));
+
+        let root = self
+            .agent
+            .get(&endpoint)
+            .set("Authorization", &authorization)
+            .set("Content-Type", "application/json")
+            .call()
+            .map_err(|error| to_api_error(error, "CHZZK stream-key request failed"))?
+            .into_json::<Value>()
+            .map_err(|error| ChzzkApiError(format!("CHZZK stream-key parse failed: {error}")))?;
+
+        debug(format!(
+            "CHZZK API response: method=GET endpoint={} body={}",
+            endpoint,
+            masked_json_string(&root)
+        ));
+
+        validate_api_code(&root)?;
+        let payload = extract_payload(&root);
+        let stream_key = extract_string(payload, "streamKey").ok_or_else(|| {
+            ChzzkApiError(format!(
+                "CHZZK stream-key response missing streamKey: {}",
+                masked_json_string(&root)
+            ))
+        })?;
+
+        Ok(ChzzkStreamKey { stream_key })
     }
 
     pub(crate) fn update_live_settings(
@@ -797,5 +848,8 @@ fn is_sensitive_key(key: &str) -> bool {
             | "refreshtoken"
             | "refresh_token"
             | "refresh-token"
+            | "streamkey"
+            | "stream_key"
+            | "stream-key"
     )
 }
