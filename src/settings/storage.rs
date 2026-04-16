@@ -10,6 +10,8 @@ use crate::logging::{debug, error as log_error, warn};
 use super::constants::SETTINGS_FILE_NAME;
 use super::model::{sync_auth_status, PluginSettings};
 
+const MAX_SETTINGS_FILE_BYTES: u64 = 128 * 1024;
+
 fn settings_config_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -91,6 +93,18 @@ fn load_settings_from_file() -> Option<PluginSettings> {
     let path = settings_file_path();
     let mut content = String::new();
     let mut file = fs::File::open(&path).ok()?;
+
+    if let Ok(metadata) = file.metadata() {
+        if metadata.len() > MAX_SETTINGS_FILE_BYTES {
+            warn(format!(
+                "obs-chzzk-extension: settings file too large ({} bytes), ignoring {}",
+                metadata.len(),
+                path.display()
+            ));
+            return None;
+        }
+    }
+
     file.read_to_string(&mut content).ok()?;
 
     let root = serde_json::from_str::<Value>(&content).ok()?;
@@ -120,7 +134,19 @@ fn load_settings_from_file() -> Option<PluginSettings> {
     };
 
     sync_auth_status(&mut settings);
+
+    #[cfg(unix)]
+    {
+        enforce_private_permissions(&path);
+    }
+
     Some(settings)
+}
+
+fn settings_content_matches(path: &Path, rendered: &str) -> bool {
+    fs::read_to_string(path)
+        .map(|existing| existing == rendered)
+        .unwrap_or(false)
 }
 
 pub(crate) fn load_profile_settings() -> PluginSettings {
@@ -148,6 +174,11 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
                 error
             ));
             return;
+        }
+
+        #[cfg(unix)]
+        {
+            enforce_private_directory_permissions(parent);
         }
     }
 
@@ -199,6 +230,11 @@ pub(crate) fn persist_settings_to_file(settings: &PluginSettings) {
             return;
         }
     };
+
+    if settings_content_matches(&path, &rendered) {
+        debug("settings unchanged; skipping disk write");
+        return;
+    }
 
     let temp_path = path.with_extension("json.tmp");
     match create_private_file(&temp_path).and_then(|mut file| file.write_all(rendered.as_bytes())) {
@@ -260,5 +296,19 @@ fn enforce_private_permissions(path: &Path) {
                 error
             ));
         }
+    }
+}
+
+#[cfg(unix)]
+fn enforce_private_directory_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let perms = fs::Permissions::from_mode(0o700);
+    if let Err(error) = fs::set_permissions(path, perms) {
+        warn(format!(
+            "obs-chzzk-extension: failed to set private directory permissions on {}: {}",
+            path.display(),
+            error
+        ));
     }
 }

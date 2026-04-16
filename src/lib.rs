@@ -16,7 +16,7 @@ mod notification_popup;
 #[cfg(unix)]
 mod presence;
 #[path = "qt-rs/live_dock.rs"]
-mod qt_bridge;
+mod live_dock;
 mod settings;
 
 #[cfg(unix)]
@@ -86,15 +86,35 @@ fn frontend_event_name(event: ObsFrontendEvent) -> &'static str {
 }
 
 #[cfg(unix)]
+fn next_presence_start_token() -> u64 {
+    PRESENCE_START_TOKEN
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+}
+
+#[cfg(unix)]
+fn is_presence_start_token_current(token: u64) -> bool {
+    PRESENCE_START_TOKEN.load(Ordering::SeqCst) == token
+}
+
+#[cfg(unix)]
+fn should_stop_presence_on_event(event: ObsFrontendEvent) -> bool {
+    matches!(
+        event,
+        OBS_FRONTEND_EVENT_STREAMING_STOPPING
+            | OBS_FRONTEND_EVENT_STREAMING_STOPPED
+            | OBS_FRONTEND_EVENT_EXIT
+    )
+}
+
+#[cfg(unix)]
 fn start_presence_for_current_stream() {
     if !settings::current_settings().discord_presence_enabled {
         info("Discord Rich Presence is disabled in settings; skip scheduling presence start");
         return;
     }
 
-    let token = PRESENCE_START_TOKEN
-        .fetch_add(1, Ordering::SeqCst)
-        .wrapping_add(1);
+    let token = next_presence_start_token();
     info(format!(
         "presence start scheduled with {}s delay (token={})",
         PRESENCE_START_DELAY_SECS, token
@@ -103,7 +123,7 @@ fn start_presence_for_current_stream() {
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(PRESENCE_START_DELAY_SECS));
 
-        if PRESENCE_START_TOKEN.load(Ordering::SeqCst) != token {
+        if !is_presence_start_token_current(token) {
             debug(format!(
                 "presence start cancelled during delay (stale token={})",
                 token
@@ -140,9 +160,7 @@ fn start_presence_for_current_stream() {}
 
 #[cfg(unix)]
 pub(crate) fn stop_presence() {
-    let token = PRESENCE_START_TOKEN
-        .fetch_add(1, Ordering::SeqCst)
-        .wrapping_add(1);
+    let token = next_presence_start_token();
     debug(format!(
         "presence stop requested: invalidated pending delayed starts (token={})",
         token
@@ -183,14 +201,17 @@ unsafe extern "C" fn frontend_event_callback(event: ObsFrontendEvent, _private_d
         event,
         frontend_event_name(event)
     ));
-    match event {
-        OBS_FRONTEND_EVENT_STREAMING_STARTED => start_presence_for_current_stream(),
-        OBS_FRONTEND_EVENT_STREAMING_STOPPING
-        | OBS_FRONTEND_EVENT_STREAMING_STOPPED
-        | OBS_FRONTEND_EVENT_EXIT => {
+
+    if event == OBS_FRONTEND_EVENT_STREAMING_STARTED {
+        start_presence_for_current_stream();
+        return;
+    }
+
+    #[cfg(unix)]
+    {
+        if should_stop_presence_on_event(event) {
             stop_presence();
         }
-        _ => {}
     }
 }
 

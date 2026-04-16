@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -7,7 +8,9 @@ use std::time::Duration;
 use crate::logging::{debug, error as log_error, info};
 
 const MAX_REQUEST_BYTES: usize = 8192;
+const MAX_CALLBACK_PARAM_BYTES: usize = 2048;
 const READ_TIMEOUT_SECS: u64 = 10;
+const ACCEPT_RETRY_INTERVAL_MS: u64 = 25;
 
 #[derive(Clone)]
 pub(crate) struct OAuthCallbackData {
@@ -17,12 +20,14 @@ pub(crate) struct OAuthCallbackData {
 
 pub(crate) struct OAuthCallbackServer {
     result: Arc<Mutex<Option<OAuthCallbackData>>>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl OAuthCallbackServer {
     pub(crate) fn new() -> Self {
         Self {
             result: Arc::new(Mutex::new(None)),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -33,20 +38,45 @@ impl OAuthCallbackServer {
     ) -> Result<thread::JoinHandle<()>, String> {
         let listener = TcpListener::bind(("127.0.0.1", port))
             .map_err(|e| format!("Failed to bind OAuth callback server: {}", e))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| format!("Failed to configure OAuth callback server: {}", e))?;
 
         info(format!("OAuth callback server listening on port {}", port));
 
         let result = Arc::clone(&self.result);
+        let shutdown = Arc::clone(&self.shutdown);
         let expected_state = expected_state.to_string();
 
         let handle = thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                debug("OAuth callback server received request");
-                handle_client(stream, result, &expected_state);
+            loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    debug("OAuth callback server stopping by request");
+                    break;
+                }
+
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        debug("OAuth callback server received request");
+                        handle_client(stream, result, &expected_state);
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(ACCEPT_RETRY_INTERVAL_MS));
+                    }
+                    Err(error) => {
+                        log_error(format!("OAuth callback accept failed: {}", error));
+                        break;
+                    }
+                }
             }
         });
 
         Ok(handle)
+    }
+
+    pub(crate) fn stop(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
     }
 
     pub(crate) fn get_result(&self) -> Option<OAuthCallbackData> {
@@ -62,64 +92,78 @@ fn handle_client(
     let _ = stream.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
 
     let mut buffer = [0; MAX_REQUEST_BYTES];
-    if let Ok(n) = stream.read(&mut buffer) {
-        if n == 0 {
-            send_error_response(&mut stream, "Empty request");
+    let n = match stream.read(&mut buffer) {
+        Ok(n) => n,
+        Err(error) => {
+            log_error(format!("OAuth callback read failed: {}", error));
+            send_error_response(&mut stream, "Failed to read request");
             return;
         }
-        if n >= MAX_REQUEST_BYTES {
-            send_error_response(&mut stream, "Request too large");
-            return;
-        }
+    };
 
-        let request = String::from_utf8_lossy(&buffer[..n]);
-        let request_line = request.lines().next().unwrap_or("unknown");
-        debug(format!("OAuth callback request: {}", request_line));
-
-        let Some((method, target)) = parse_request_line(request_line) else {
-            send_error_response(&mut stream, "Malformed request line");
-            return;
-        };
-
-        if method != "GET" {
-            send_error_response(&mut stream, "Unsupported HTTP method");
-            return;
-        }
-
-        if !target.starts_with("/callback") {
-            send_error_response(&mut stream, "Invalid callback path");
-            return;
-        }
-
-        let Some(query) = extract_query_from_target(target) else {
-            send_error_response(&mut stream, "Missing query parameters");
-            return;
-        };
-
-        let Some(code) = extract_query_param(query, "code") else {
-            log_error("OAuth callback missing code parameter");
-            send_error_response(&mut stream, "Missing code parameter");
-            return;
-        };
-
-        let Some(state) = extract_query_param(query, "state") else {
-            log_error("OAuth callback missing state parameter");
-            send_error_response(&mut stream, "Missing state parameter");
-            return;
-        };
-
-        if !constant_time_eq(&state, expected_state) {
-            log_error("OAuth callback state mismatch");
-            send_error_response(&mut stream, "State mismatch");
-            return;
-        }
-
-        if let Ok(mut r) = result.lock() {
-            *r = Some(OAuthCallbackData { code, state });
-            info("OAuth callback received successfully");
-        }
-        send_success_response(&mut stream);
+    if n == 0 {
+        send_error_response(&mut stream, "Empty request");
+        return;
     }
+    if n >= MAX_REQUEST_BYTES {
+        send_error_response(&mut stream, "Request too large");
+        return;
+    }
+
+    let request = String::from_utf8_lossy(&buffer[..n]);
+    let request_line = request.lines().next().unwrap_or("unknown");
+    debug(format!("OAuth callback request: {}", request_line));
+
+    let Some((method, target)) = parse_request_line(request_line) else {
+        send_error_response(&mut stream, "Malformed request line");
+        return;
+    };
+
+    if method != "GET" {
+        send_error_response(&mut stream, "Unsupported HTTP method");
+        return;
+    }
+
+    let (path, query) = split_target(target);
+    if path != "/callback" {
+        send_error_response(&mut stream, "Invalid callback path");
+        return;
+    }
+
+    let Some(query) = query else {
+        send_error_response(&mut stream, "Missing query parameters");
+        return;
+    };
+
+    let Some(code) = extract_query_param(query, "code") else {
+        log_error("OAuth callback missing code parameter");
+        send_error_response(&mut stream, "Missing code parameter");
+        return;
+    };
+
+    let Some(state) = extract_query_param(query, "state") else {
+        log_error("OAuth callback missing state parameter");
+        send_error_response(&mut stream, "Missing state parameter");
+        return;
+    };
+
+    if code.len() > MAX_CALLBACK_PARAM_BYTES || state.len() > MAX_CALLBACK_PARAM_BYTES {
+        send_error_response(&mut stream, "OAuth callback parameter too large");
+        return;
+    }
+
+    if !constant_time_eq(&state, expected_state) {
+        log_error("OAuth callback state mismatch");
+        send_error_response(&mut stream, "State mismatch");
+        return;
+    }
+
+    if let Ok(mut r) = result.lock() {
+        *r = Some(OAuthCallbackData { code, state });
+        info("OAuth callback received successfully");
+    }
+
+    send_success_response(&mut stream);
 }
 
 fn parse_request_line(line: &str) -> Option<(&str, &str)> {
@@ -130,9 +174,11 @@ fn parse_request_line(line: &str) -> Option<(&str, &str)> {
     Some((method, target))
 }
 
-fn extract_query_from_target(target: &str) -> Option<&str> {
-    let (_, query) = target.split_once('?')?;
-    Some(query)
+fn split_target(target: &str) -> (&str, Option<&str>) {
+    match target.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (target, None),
+    }
 }
 
 fn extract_query_param(query: &str, param: &str) -> Option<String> {

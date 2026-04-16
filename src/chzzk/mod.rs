@@ -1,9 +1,11 @@
 use std::fmt;
+use std::io::Read;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::logging::{debug, error as log_error, info};
+use crate::logging::{debug, error as log_error, info, warn};
 
 pub(crate) mod oauth_server;
 
@@ -13,6 +15,13 @@ const DEFAULT_SERVICE_BASE: &str = "https://api.chzzk.naver.com";
 const DEFAULT_UNOFFICIAL_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const MASKED: &str = "***";
+const HTTP_TIMEOUT_SECS: u64 = 3;
+const MAX_HTTP_REDIRECTS: u32 = 3;
+const MAX_ERROR_BODY_BYTES: usize = 16 * 1024;
+const MAX_LOG_JSON_CHARS: usize = 2048;
+const MAX_ERROR_DETAIL_CHARS: usize = 512;
+
+static SHARED_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 
 #[derive(Clone)]
 pub(crate) struct ChzzkLiveSettings {
@@ -74,20 +83,83 @@ pub(crate) struct ChzzkClient {
     agent: ureq::Agent,
 }
 
+fn is_valid_url_authority(authority: &str) -> bool {
+    authority
+        .split('/')
+        .next()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let host_port = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or(authority)
+        .split('/')
+        .next()
+        .unwrap_or(authority);
+
+    let host = if let Some(stripped) = host_port.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or(stripped)
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
+fn normalize_api_base(api_base: &str) -> String {
+    let trimmed = api_base.trim();
+    if trimmed.is_empty() {
+        return DEFAULT_API_BASE.to_string();
+    }
+
+    let normalized = trimmed.trim_end_matches('/');
+    let lower = normalized.to_ascii_lowercase();
+
+    if let Some(authority) = lower.strip_prefix("https://") {
+        if is_valid_url_authority(authority) {
+            return normalized.to_string();
+        }
+
+        warn("invalid CHZZK API base URL host; fallback to default HTTPS endpoint");
+        return DEFAULT_API_BASE.to_string();
+    }
+
+    if let Some(authority) = lower.strip_prefix("http://") {
+        if is_valid_url_authority(authority) && is_loopback_authority(authority) {
+            warn("using HTTP CHZZK API base URL for loopback endpoint");
+            return normalized.to_string();
+        }
+
+        warn("refusing non-loopback HTTP CHZZK API base URL; fallback to default HTTPS endpoint");
+        return DEFAULT_API_BASE.to_string();
+    }
+
+    warn("unsupported CHZZK API base URL scheme; fallback to default HTTPS endpoint");
+    DEFAULT_API_BASE.to_string()
+}
+
+fn build_shared_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .timeout_read(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .timeout_write(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .redirects(MAX_HTTP_REDIRECTS)
+        .build()
+}
+
+fn shared_agent() -> ureq::Agent {
+    SHARED_AGENT.get_or_init(build_shared_agent).clone()
+}
+
 impl ChzzkClient {
     pub(crate) fn new(api_base: &str) -> Self {
-        let base = if api_base.trim().is_empty() {
-            DEFAULT_API_BASE.to_string()
-        } else {
-            api_base.trim().trim_end_matches('/').to_string()
-        };
+        let base = normalize_api_base(api_base);
         debug(format!("CHZZK client init: api_base={}", base));
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(3))
-            .timeout_read(Duration::from_secs(3))
-            .timeout_write(Duration::from_secs(3))
-            .build();
+        let agent = shared_agent();
 
         Self {
             api_base: base,
@@ -181,11 +253,13 @@ impl ChzzkClient {
         Ok(access_token)
     }
 
-    pub(crate) fn fetch_live_settings(
+    fn bearer_get_json(
         &self,
+        endpoint: &str,
         access_token: &str,
-    ) -> Result<ChzzkLiveSettings, ChzzkApiError> {
-        let endpoint = format!("{}/open/v1/lives/setting", self.api_base);
+        request_context: &str,
+        parse_context: &str,
+    ) -> Result<Value, ChzzkApiError> {
         let authorization = format!("Bearer {}", access_token);
         let masked_authorization = format!("Bearer {}", mask_secret(access_token));
 
@@ -196,13 +270,13 @@ impl ChzzkClient {
 
         let root = self
             .agent
-            .get(&endpoint)
+            .get(endpoint)
             .set("Authorization", &authorization)
             .set("Content-Type", "application/json")
             .call()
-            .map_err(|error| to_api_error(error, "CHZZK live-setting request failed"))?
+            .map_err(|error| to_api_error(error, request_context))?
             .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK live-setting parse failed: {error}")))?;
+            .map_err(|error| ChzzkApiError(format!("{}: {error}", parse_context)))?;
 
         debug(format!(
             "CHZZK API response: method=GET endpoint={} body={}",
@@ -211,6 +285,88 @@ impl ChzzkClient {
         ));
 
         validate_api_code(&root)?;
+        Ok(root)
+    }
+
+    fn client_credentials_get_json(
+        &self,
+        endpoint: &str,
+        client_id: &str,
+        client_secret: &str,
+        request_context: &str,
+        parse_context: &str,
+    ) -> Result<Value, ChzzkApiError> {
+        debug(format!(
+            "CHZZK API request: method=GET endpoint={} headers={{\"Client-Id\":\"{}\",\"Client-Secret\":\"{}\",\"Content-Type\":\"application/json\"}}",
+            endpoint,
+            mask_secret(client_id),
+            mask_secret(client_secret)
+        ));
+
+        let root = self
+            .agent
+            .get(endpoint)
+            .set("Client-Id", client_id)
+            .set("Client-Secret", client_secret)
+            .set("Content-Type", "application/json")
+            .call()
+            .map_err(|error| to_api_error(error, request_context))?
+            .into_json::<Value>()
+            .map_err(|error| ChzzkApiError(format!("{}: {error}", parse_context)))?;
+
+        debug(format!(
+            "CHZZK API response: method=GET endpoint={} body={}",
+            endpoint,
+            masked_json_string(&root)
+        ));
+
+        validate_api_code(&root)?;
+        Ok(root)
+    }
+
+    fn unofficial_get_json(
+        &self,
+        endpoint: &str,
+        request_context: &str,
+        parse_context: &str,
+    ) -> Result<Value, ChzzkApiError> {
+        debug(format!(
+            "CHZZK unofficial request: method=GET endpoint={} headers={{\"User-Agent\":\"{}\",\"Accept\":\"application/json\"}}",
+            endpoint, DEFAULT_UNOFFICIAL_USER_AGENT
+        ));
+
+        let root = self
+            .agent
+            .get(endpoint)
+            .set("User-Agent", DEFAULT_UNOFFICIAL_USER_AGENT)
+            .set("Accept", "application/json")
+            .set("Referer", "https://chzzk.naver.com")
+            .call()
+            .map_err(|error| to_api_error(error, request_context))?
+            .into_json::<Value>()
+            .map_err(|error| ChzzkApiError(format!("{}: {error}", parse_context)))?;
+
+        debug(format!(
+            "CHZZK unofficial response: method=GET endpoint={} body={}",
+            endpoint,
+            masked_json_string(&root)
+        ));
+
+        validate_api_code(&root)?;
+        Ok(root)
+    }
+
+    pub(crate) fn fetch_live_settings(
+        &self,
+        access_token: &str,
+    ) -> Result<ChzzkLiveSettings, ChzzkApiError> {
+        let endpoint = format!("{}/open/v1/lives/setting", self.api_base);
+        let root = self.bearer_get_json(
+            &endpoint,
+            access_token,
+            "CHZZK live-setting request failed",
+            "CHZZK live-setting parse failed",
+        )?;
         let payload = extract_payload(&root);
         let category = payload.get("category");
 
@@ -255,31 +411,12 @@ impl ChzzkClient {
         }
 
         let endpoint = format!("{}/open/v1/streams/key", self.api_base);
-        let authorization = format!("Bearer {}", access_token);
-        let masked_authorization = format!("Bearer {}", mask_secret(access_token));
-
-        debug(format!(
-            "CHZZK API request: method=GET endpoint={} headers={{\"Authorization\":\"{}\",\"Content-Type\":\"application/json\"}}",
-            endpoint, masked_authorization
-        ));
-
-        let root = self
-            .agent
-            .get(&endpoint)
-            .set("Authorization", &authorization)
-            .set("Content-Type", "application/json")
-            .call()
-            .map_err(|error| to_api_error(error, "CHZZK stream-key request failed"))?
-            .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK stream-key parse failed: {error}")))?;
-
-        debug(format!(
-            "CHZZK API response: method=GET endpoint={} body={}",
-            endpoint,
-            masked_json_string(&root)
-        ));
-
-        validate_api_code(&root)?;
+        let root = self.bearer_get_json(
+            &endpoint,
+            access_token,
+            "CHZZK stream-key request failed",
+            "CHZZK stream-key parse failed",
+        )?;
         let payload = extract_payload(&root);
         let stream_key = extract_string(payload, "streamKey").ok_or_else(|| {
             ChzzkApiError(format!(
@@ -420,33 +557,13 @@ impl ChzzkClient {
             size
         );
 
-        debug(format!(
-            "CHZZK API request: method=GET endpoint={} headers={{\"Client-Id\":\"{}\",\"Client-Secret\":\"{}\",\"Content-Type\":\"application/json\"}}",
-            endpoint,
-            mask_secret(client_id),
-            mask_secret(client_secret)
-        ));
-
-        let root = self
-            .agent
-            .get(&endpoint)
-            .set("Client-Id", client_id)
-            .set("Client-Secret", client_secret)
-            .set("Content-Type", "application/json")
-            .call()
-            .map_err(|error| to_api_error(error, "CHZZK category search request failed"))?
-            .into_json::<Value>()
-            .map_err(|error| {
-                ChzzkApiError(format!("CHZZK category search parse failed: {error}"))
-            })?;
-
-        debug(format!(
-            "CHZZK API response: method=GET endpoint={} body={}",
-            endpoint,
-            masked_json_string(&root)
-        ));
-
-        validate_api_code(&root)?;
+        let root = self.client_credentials_get_json(
+            &endpoint,
+            client_id,
+            client_secret,
+            "CHZZK category search request failed",
+            "CHZZK category search parse failed",
+        )?;
         let payload = extract_payload(&root);
         let category_items = payload.as_array().ok_or_else(|| {
             ChzzkApiError(format!("CHZZK category response missing list: {}", root))
@@ -495,33 +612,11 @@ impl ChzzkClient {
             simple_url_encode(channel_id)
         );
 
-        debug(format!(
-            "CHZZK unofficial request: method=GET endpoint={} headers={{\"User-Agent\":\"{}\",\"Accept\":\"application/json\"}}",
-            endpoint, DEFAULT_UNOFFICIAL_USER_AGENT
-        ));
-
-        let root = self
-            .agent
-            .get(&endpoint)
-            .set("User-Agent", DEFAULT_UNOFFICIAL_USER_AGENT)
-            .set("Accept", "application/json")
-            .set("Referer", "https://chzzk.naver.com")
-            .call()
-            .map_err(|error| to_api_error(error, "CHZZK unofficial live-detail request failed"))?
-            .into_json::<Value>()
-            .map_err(|error| {
-                ChzzkApiError(format!(
-                    "CHZZK unofficial live-detail parse failed: {error}"
-                ))
-            })?;
-
-        debug(format!(
-            "CHZZK unofficial response: method=GET endpoint={} body={}",
-            endpoint,
-            masked_json_string(&root)
-        ));
-
-        validate_api_code(&root)?;
+        let root = self.unofficial_get_json(
+            &endpoint,
+            "CHZZK unofficial live-detail request failed",
+            "CHZZK unofficial live-detail parse failed",
+        )?;
         let payload = extract_payload(&root);
         let thumbnail = extract_live_item_thumbnail_url(payload).or_else(|| {
             payload
@@ -548,31 +643,12 @@ impl ChzzkClient {
         }
 
         let endpoint = format!("{}/open/v1/users/me", self.api_base);
-        let authorization = format!("Bearer {}", access_token);
-        let masked_authorization = format!("Bearer {}", mask_secret(access_token));
-
-        debug(format!(
-            "CHZZK API request: method=GET endpoint={} headers={{\"Authorization\":\"{}\",\"Content-Type\":\"application/json\"}}",
-            endpoint, masked_authorization
-        ));
-
-        let root = self
-            .agent
-            .get(&endpoint)
-            .set("Authorization", &authorization)
-            .set("Content-Type", "application/json")
-            .call()
-            .map_err(|error| to_api_error(error, "CHZZK user request failed"))?
-            .into_json::<Value>()
-            .map_err(|error| ChzzkApiError(format!("CHZZK user parse failed: {error}")))?;
-
-        debug(format!(
-            "CHZZK API response: method=GET endpoint={} body={}",
-            endpoint,
-            masked_json_string(&root)
-        ));
-
-        validate_api_code(&root)?;
+        let root = self.bearer_get_json(
+            &endpoint,
+            access_token,
+            "CHZZK user request failed",
+            "CHZZK user parse failed",
+        )?;
         let payload = extract_payload(&root);
         let channel_root = payload.get("channel").unwrap_or(payload);
 
@@ -659,7 +735,7 @@ impl ChzzkClient {
 fn to_api_error(error: ureq::Error, context: &str) -> ChzzkApiError {
     let message = match error {
         ureq::Error::Status(status, response) => {
-            let body = response.into_string().unwrap_or_default();
+            let body = read_limited_response_body(response);
             let detail = extract_error_detail(&body);
             format!("{} ({}): {}", context, status, detail)
         }
@@ -669,15 +745,46 @@ fn to_api_error(error: ureq::Error, context: &str) -> ChzzkApiError {
     ChzzkApiError(message)
 }
 
+fn read_limited_response_body(response: ureq::Response) -> String {
+    let mut reader = response.into_reader().take((MAX_ERROR_BODY_BYTES + 1) as u64);
+    let mut bytes = Vec::new();
+    if reader.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+
+    let truncated = bytes.len() > MAX_ERROR_BODY_BYTES;
+    if truncated {
+        bytes.truncate(MAX_ERROR_BODY_BYTES);
+    }
+
+    let mut body = String::from_utf8_lossy(&bytes).to_string();
+    if truncated {
+        body.push_str("...<body truncated>");
+    }
+    body
+}
+
+fn preview_text(text: String, max_chars: usize) -> String {
+    let text_len = text.chars().count();
+    if text_len <= max_chars {
+        return text;
+    }
+
+    let prefix = text.chars().take(max_chars).collect::<String>();
+    format!("{}...<{} chars truncated>", prefix, text_len - max_chars)
+}
+
 fn extract_error_detail(raw_body: &str) -> String {
-    match serde_json::from_str::<Value>(raw_body) {
+    let detail = match serde_json::from_str::<Value>(raw_body) {
         Ok(value) => value
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or(raw_body)
             .to_string(),
         Err(_) => raw_body.to_string(),
-    }
+    };
+
+    preview_text(detail, MAX_ERROR_DETAIL_CHARS)
 }
 
 fn mask_secret(value: &str) -> String {
@@ -742,7 +849,8 @@ fn mask_json_value(key: Option<&str>, value: &Value) -> Value {
 
 fn masked_json_string(value: &Value) -> String {
     let masked = mask_json_value(None, value);
-    serde_json::to_string(&masked).unwrap_or_else(|_| "<json-encode-failed>".to_string())
+    let encoded = serde_json::to_string(&masked).unwrap_or_else(|_| "<json-encode-failed>".to_string());
+    preview_text(encoded, MAX_LOG_JSON_CHARS)
 }
 
 fn validate_api_code(root: &Value) -> Result<(), ChzzkApiError> {

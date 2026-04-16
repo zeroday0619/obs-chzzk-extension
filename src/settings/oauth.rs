@@ -3,15 +3,69 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::chzzk::oauth_server::{OAuthCallbackData, OAuthCallbackServer};
 use crate::chzzk::ChzzkClient;
-use crate::logging::{debug, info};
+use crate::logging::{debug, info, warn};
 
 use super::constants::{
     OAUTH_CALLBACK_POLL_INTERVAL_MS, OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_WAIT_TIMEOUT_SECS,
 };
 use super::model::PluginSettings;
 
+const OAUTH_STATE_RANDOM_BYTES: usize = 24;
+
+struct OAuthServerGuard<'a> {
+    server: &'a OAuthCallbackServer,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl<'a> OAuthServerGuard<'a> {
+    fn new(server: &'a OAuthCallbackServer, handle: thread::JoinHandle<()>) -> Self {
+        Self {
+            server,
+            handle: Some(handle),
+        }
+    }
+
+    fn stop_and_join(&mut self) {
+        self.server.stop();
+        if let Some(handle) = self.handle.take() {
+            if handle.join().is_err() {
+                warn("OAuth callback server thread panicked while joining");
+            }
+        }
+    }
+}
+
+impl Drop for OAuthServerGuard<'_> {
+    fn drop(&mut self) {
+        self.stop_and_join();
+    }
+}
+
 fn oauth_redirect_uri() -> String {
     format!("http://127.0.0.1:{}/callback", OAUTH_CALLBACK_PORT)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{:02x}", byte);
+    }
+    encoded
+}
+
+fn generate_oauth_state() -> String {
+    let mut random = [0u8; OAUTH_STATE_RANDOM_BYTES];
+    if getrandom::getrandom(&mut random).is_ok() {
+        return format!("obs-chzzk-extension-{}", hex_encode(&random));
+    }
+
+    warn("secure random generation failed for OAuth state; using timestamp fallback");
+    let fallback = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("obs-chzzk-extension-fallback-{:x}", fallback)
 }
 
 pub(crate) fn request_authorization_token(settings: &PluginSettings) -> Result<String, String> {
@@ -25,18 +79,12 @@ pub(crate) fn request_authorization_token(settings: &PluginSettings) -> Result<S
         OAUTH_CALLBACK_PORT
     ));
     let oauth_server = OAuthCallbackServer::new();
+    let state = generate_oauth_state();
 
-    let state = format!(
-        "obs-chzzk-extension-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    );
-
-    oauth_server
+    let handle = oauth_server
         .start(OAUTH_CALLBACK_PORT, &state)
         .map_err(|error| format!("Failed to start OAuth callback server: {}", error))?;
+    let mut server_guard = OAuthServerGuard::new(&oauth_server, handle);
 
     debug("OAuth callback server started");
 
@@ -55,6 +103,8 @@ pub(crate) fn request_authorization_token(settings: &PluginSettings) -> Result<S
         Duration::from_secs(OAUTH_CALLBACK_WAIT_TIMEOUT_SECS),
     )
     .ok_or_else(|| "OAuth callback server did not receive authorization code".to_string())?;
+
+    server_guard.stop_and_join();
 
     if callback_data.state != state {
         return Err("OAuth state mismatch - CSRF detected".to_string());

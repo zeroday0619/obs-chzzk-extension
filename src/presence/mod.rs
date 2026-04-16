@@ -5,6 +5,12 @@ use crate::chzzk::ChzzkClient;
 use crate::logging::{debug, info, warn};
 use crate::settings::current_settings;
 
+const DEFAULT_CHZZK_API_BASE: &str = "https://openapi.chzzk.naver.com";
+const DEFAULT_ACTIVITY_NAME: &str = "CHZZK Live";
+const DEFAULT_ACTIVITY_DETAILS: &str = "치지직 라이브 송출 중";
+const DEFAULT_ACTIVITY_STATE: &str = "CHZZK";
+const LIVE_BUTTON_LABEL: &str = "치지직 방송 보러가기";
+
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub(crate) enum ActivityType {
@@ -195,6 +201,52 @@ fn is_supported_stream_url(url: &str) -> bool {
         || normalized.starts_with("https://chzzk.naver.com/")
 }
 
+fn select_activity_name(
+    configured_name: Option<String>,
+    channel_name: Option<&str>,
+    live_title: Option<&str>,
+) -> String {
+    match configured_name {
+        Some(name) if name != DEFAULT_ACTIVITY_NAME => name,
+        _ => match (channel_name, live_title) {
+            (Some(channel), Some(title)) => format!("{} - {}", channel, title),
+            (Some(channel), None) => format!("{} Live", channel),
+            (None, Some(title)) => title.to_string(),
+            (None, None) => DEFAULT_ACTIVITY_NAME.to_string(),
+        },
+    }
+}
+
+fn select_activity_state(category_name: Option<&str>, channel_name: Option<&str>) -> String {
+    if let Some(category) = category_name {
+        return format!("카테고리: {}", category);
+    }
+
+    channel_name
+        .map(str::to_string)
+        .unwrap_or_else(|| DEFAULT_ACTIVITY_STATE.to_string())
+}
+
+fn build_channel_live_url(channel_id: Option<&str>) -> Option<String> {
+    channel_id.map(|id| format!("https://chzzk.naver.com/live/{}", id))
+}
+
+fn resolve_stream_url(button_url: Option<&str>) -> Option<String> {
+    button_url
+        .filter(|url| is_supported_stream_url(url))
+        .map(str::to_string)
+}
+
+fn resolve_thumbnail_url(client: &ChzzkClient, channel_id: Option<&str>) -> Option<String> {
+    match client.fetch_live_thumbnail_image_url(channel_id) {
+        Ok(url) => url,
+        Err(error) => {
+            warn(format!("CHZZK live thumbnail is unavailable: {}", error));
+            None
+        }
+    }
+}
+
 pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
     let settings = current_settings();
     if !settings.discord_presence_enabled {
@@ -213,10 +265,8 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
         warn("Discord Application ID is empty; configure it in settings.");
         return None;
     };
-    let mut user_channel_info = None;
-
     let api_base_url = non_empty(&settings.chzzk_api_base_url)
-        .unwrap_or_else(|| "https://openapi.chzzk.naver.com".to_string());
+        .unwrap_or_else(|| DEFAULT_CHZZK_API_BASE.to_string());
 
     let client = ChzzkClient::new(&api_base_url);
     let Some(user_access_token) = non_empty(&settings.chzzk_authorization_token) else {
@@ -224,27 +274,29 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
         return None;
     };
 
-    match client.fetch_user_channel_info(&user_access_token) {
+    let user_channel_info = match client.fetch_user_channel_info(&user_access_token) {
         Ok(info) => {
             debug(format!(
                 "CHZZK user channel loaded: has_channel_id={}, has_channel_name={}",
                 info.channel_id.is_some(),
                 info.channel_name.is_some()
             ));
-            user_channel_info = Some(info);
+            Some(info)
         }
         Err(error) => {
             warn(format!("CHZZK user info is unavailable: {}", error));
+            None
         }
-    }
+    };
 
-    let live_settings_result = client.fetch_live_settings(&user_access_token);
+    let live_settings = match client.fetch_live_settings(&user_access_token) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            warn(format!("CHZZK API data is unavailable: {}", error));
+            None
+        }
+    };
 
-    if let Err(error) = &live_settings_result {
-        warn(format!("CHZZK API data is unavailable: {}", error));
-    }
-
-    let live_settings = live_settings_result.ok();
     debug(format!(
         "building presence: token_len={}, api_base={}",
         user_access_token.len(),
@@ -269,51 +321,38 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
         .filter(|name| !name.is_empty())
         .map(|name| name.to_string());
 
-    let configured_activity_name = non_empty(&settings.discord_activity_name);
-    let activity_name = match configured_activity_name {
-        Some(name) if name != "CHZZK Live" => name,
-        _ => match (&channel_name, &live_title) {
-            (Some(channel), Some(title)) => format!("{} - {}", channel, title),
-            (Some(channel), None) => format!("{} Live", channel),
-            (None, Some(title)) => title.clone(),
-            (None, None) => "CHZZK Live".to_string(),
-        },
-    };
+    let activity_name = select_activity_name(
+        non_empty(&settings.discord_activity_name),
+        channel_name.as_deref(),
+        live_title.as_deref(),
+    );
 
-    let details = live_title.unwrap_or_else(|| "치지직 라이브 송출 중".to_string());
+    let details = live_title
+        .clone()
+        .unwrap_or_else(|| DEFAULT_ACTIVITY_DETAILS.to_string());
 
-    let state = live_settings
+    let category_name = live_settings
         .as_ref()
         .and_then(|value| {
             value
                 .category_name
                 .as_ref()
-                .map(|category| format!("카테고리: {}", category))
-        })
-        .or_else(|| channel_name.clone())
-        .unwrap_or_else(|| "CHZZK".to_string());
+                .map(|category| category.trim())
+                .filter(|category| !category.is_empty())
+        });
 
-    let live_thumbnail_image_url = match client.fetch_live_thumbnail_image_url(
-        user_channel_info
-            .as_ref()
-            .and_then(|value| value.channel_id.as_deref()),
-    ) {
-        Ok(url) => url,
-        Err(error) => {
-            warn(format!("CHZZK live thumbnail is unavailable: {}", error));
-            None
-        }
-    };
+    let state = select_activity_state(category_name, channel_name.as_deref());
 
-    let button_url = user_channel_info
+    let channel_id = user_channel_info
         .as_ref()
         .and_then(|value| value.channel_id.as_ref())
-        .map(|channel_id| format!("https://chzzk.naver.com/live/{}", channel_id));
+        .map(String::as_str);
 
-    let stream_url = button_url
-        .as_ref()
-        .filter(|url| is_supported_stream_url(url))
-        .cloned();
+    let live_thumbnail_image_url = resolve_thumbnail_url(&client, channel_id);
+
+    let button_url = build_channel_live_url(channel_id);
+
+    let stream_url = resolve_stream_url(button_url.as_deref());
 
     let activity_type = ActivityType::Playing;
 
@@ -334,7 +373,7 @@ pub(crate) fn build_presence_config() -> Option<PresenceConfig> {
     }
 
     if let Some(url) = button_url {
-        activity = activity.button("치지직 방송 보러가기", url);
+        activity = activity.button(LIVE_BUTTON_LABEL, url);
     }
 
     if let Some(thumbnail_url) = live_thumbnail_image_url {

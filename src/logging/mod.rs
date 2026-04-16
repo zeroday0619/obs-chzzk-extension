@@ -38,7 +38,8 @@ fn level_label(level: LogLevel) -> &'static str {
 
 fn level_from_env() -> LogLevel {
     let value = env::var("OBS_CHZZK_EXTENSION_LOG_LEVEL").unwrap_or_else(|_| "debug".to_string());
-    match value.trim().to_ascii_lowercase().as_str() {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
         "debug" => LogLevel::Debug,
         "info" => LogLevel::Info,
         "warn" | "warning" => LogLevel::Warn,
@@ -101,6 +102,18 @@ fn notify_popup(level: LogLevel, message: &str) {
     show_notification_popup(level as i32, &title, &body);
 }
 
+fn render_log_line(level: LogLevel, message: &str) -> String {
+    format!(
+        "[{}][{}][{}][pid:{}][tid:{:?}] {}",
+        timestamp_ms(),
+        level_label(level),
+        LOG_TAG,
+        std::process::id(),
+        std::thread::current().id(),
+        message
+    )
+}
+
 pub(crate) fn log(level: LogLevel, message: impl AsRef<str>) {
     let message = message.as_ref();
     notify_popup(level, message);
@@ -109,15 +122,7 @@ pub(crate) fn log(level: LogLevel, message: impl AsRef<str>) {
         return;
     }
 
-    let rendered = format!(
-        "[{}][{}][{}][pid:{}][tid:{:?}] {}",
-        timestamp_ms(),
-        level_label(level),
-        LOG_TAG,
-        std::process::id(),
-        std::thread::current().id(),
-        message
-    );
+    let rendered = render_log_line(level, message);
 
     eprintln!("{}", rendered);
 }

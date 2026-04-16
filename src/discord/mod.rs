@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -12,6 +13,9 @@ use crate::presence::{
     build_clear_activity_payload, build_handshake_payload, build_set_activity_payload,
     PresenceCommand, PresenceConfig,
 };
+
+const MAX_DISCORD_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_LOG_PAYLOAD_PREVIEW_CHARS: usize = 512;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -49,17 +53,20 @@ struct DiscordIpcClient {
 
 fn ipc_socket_candidates() -> Vec<PathBuf> {
     let mut prefixes = Vec::new();
+    let mut seen_prefixes = HashSet::new();
 
     for variable in ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"] {
         if let Ok(value) = env::var(variable) {
             let trimmed = value.trim();
-            if !trimmed.is_empty() {
+            if !trimmed.is_empty() && seen_prefixes.insert(trimmed.to_string()) {
                 prefixes.push(PathBuf::from(trimmed));
             }
         }
     }
 
-    prefixes.push(PathBuf::from("/tmp"));
+    if seen_prefixes.insert("/tmp".to_string()) {
+        prefixes.push(PathBuf::from("/tmp"));
+    }
 
     let mut candidates = Vec::new();
     for prefix in prefixes {
@@ -132,6 +139,15 @@ fn read_ipc_frame(stream: &mut UnixStream) -> io::Result<(DiscordIpcOpcode, Vec<
         )
     })?;
     let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+    if length > MAX_DISCORD_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "discord ipc frame too large: {} bytes (max {})",
+                length, MAX_DISCORD_FRAME_BYTES
+            ),
+        ));
+    }
 
     let mut payload = vec![0u8; length];
     if length > 0 {
@@ -150,7 +166,17 @@ fn read_ipc_frame(stream: &mut UnixStream) -> io::Result<(DiscordIpcOpcode, Vec<
 }
 
 fn preview_payload(payload: &str) -> String {
-    payload.replace('\n', "\\n")
+    let sanitized = payload.replace('\n', "\\n").replace('\r', "\\r");
+    let total = sanitized.chars().count();
+    if total <= MAX_LOG_PAYLOAD_PREVIEW_CHARS {
+        return sanitized;
+    }
+
+    let truncated = sanitized
+        .chars()
+        .take(MAX_LOG_PAYLOAD_PREVIEW_CHARS)
+        .collect::<String>();
+    format!("{}...<{} chars truncated>", truncated, total - MAX_LOG_PAYLOAD_PREVIEW_CHARS)
 }
 
 fn parse_json_payload(payload: &[u8]) -> Option<Value> {

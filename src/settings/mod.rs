@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::atomic::{AtomicPtr, Ordering};
 
@@ -87,6 +88,12 @@ unsafe fn obs_data_set_value(data: *mut c_void, key: &'static [u8], value: &str)
     };
 
     obs_data_set_string(data, c_char_ptr(key), value.as_ptr());
+}
+
+unsafe fn obs_data_set_default_value(data: *mut c_void, key: &'static [u8], value: &str) {
+    if let Some(value) = c_string(value) {
+        obs_data_set_default_string(data, c_char_ptr(key), value.as_ptr());
+    }
 }
 
 fn update_source_text_fields(fields: &[(&'static [u8], &str)]) -> bool {
@@ -240,12 +247,57 @@ fn response_json_ptr(response: LiveDockResponse) -> *mut c_char {
     text.into_raw()
 }
 
-pub(crate) fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> {
+fn require_linked_settings() -> Result<PluginSettings, String> {
     let settings = current_settings();
-    let access_token = settings.chzzk_authorization_token.trim();
-    if access_token.is_empty() {
+    if settings.chzzk_authorization_token.trim().is_empty() {
         return Err("CHZZK account is not linked. Run OAuth first.".to_string());
     }
+    Ok(settings)
+}
+
+fn reload_live_setting_or_status(success_status: &str, action_label: &str) -> LiveDockResponse {
+    match load_live_setting_response(success_status) {
+        Ok(response) => response,
+        Err(error) => LiveDockResponse::success(&format!(
+            "{}, but failed to refresh fields: {}",
+            action_label, error
+        )),
+    }
+}
+
+fn apply_update_and_reload(
+    settings: &PluginSettings,
+    update: &ChzzkLiveSettingUpdate,
+    success_status: &str,
+    action_label: &str,
+    error_context: &str,
+) -> Result<LiveDockResponse, String> {
+    let access_token = settings.chzzk_authorization_token.trim();
+    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
+    client
+        .update_live_settings(access_token, update)
+        .map_err(|error| format!("{}: {}", error_context, error))?;
+
+    Ok(reload_live_setting_or_status(success_status, action_label))
+}
+
+fn response_from_result(response: Result<LiveDockResponse, String>) -> LiveDockResponse {
+    match response {
+        Ok(response) => response,
+        Err(error) => {
+            log_error(&error);
+            LiveDockResponse::error(error)
+        }
+    }
+}
+
+fn response_json_from_result(response: Result<LiveDockResponse, String>) -> *mut c_char {
+    response_json_ptr(response_from_result(response))
+}
+
+pub(crate) fn load_live_setting_response(status: &str) -> Result<LiveDockResponse, String> {
+    let settings = require_linked_settings()?;
+    let access_token = settings.chzzk_authorization_token.trim();
 
     let client = ChzzkClient::new(&settings.chzzk_api_base_url);
     let live = client
@@ -373,12 +425,12 @@ pub(crate) fn search_category_response(query: &str) -> Result<LiveDockResponse, 
         .map_err(|error| format!("Failed to search category: {}", error))?;
 
     let entries = categories
-        .iter()
+        .into_iter()
         .map(|category| LiveDockCategoryEntry {
-            category_type: category.category_type.clone(),
-            category_id: category.category_id.clone(),
-            category_name: category.category_value.clone(),
-            poster_image_url: category.poster_image_url.clone(),
+            category_type: category.category_type,
+            category_id: category.category_id,
+            category_name: category.category_value,
+            poster_image_url: category.poster_image_url,
         })
         .collect::<Vec<_>>();
 
@@ -402,6 +454,7 @@ pub(crate) fn search_category_response(query: &str) -> Result<LiveDockResponse, 
 
 fn parse_tags_input(raw: &str) -> Vec<String> {
     let mut tags = Vec::new();
+    let mut seen = HashSet::new();
 
     for part in raw.split(|ch| ch == ',' || ch == '\n' || ch == '\r') {
         let tag = part.trim();
@@ -409,7 +462,8 @@ fn parse_tags_input(raw: &str) -> Vec<String> {
             continue;
         }
 
-        if !tags.iter().any(|item| item == tag) {
+        let dedup_key = tag.to_ascii_lowercase();
+        if seen.insert(dedup_key) {
             tags.push(tag.to_string());
         }
     }
@@ -423,11 +477,7 @@ pub(crate) fn apply_live_update_response(
     category_id: &str,
     tags_input: &str,
 ) -> Result<LiveDockResponse, String> {
-    let settings = current_settings();
-    let access_token = settings.chzzk_authorization_token.trim();
-    if access_token.is_empty() {
-        return Err("CHZZK account is not linked. Run OAuth first.".to_string());
-    }
+    let settings = require_linked_settings()?;
 
     let mut update = ChzzkLiveSettingUpdate::default();
     let live_title = live_title.trim();
@@ -459,70 +509,47 @@ pub(crate) fn apply_live_update_response(
         return Err("No live setting changes to apply".to_string());
     }
 
-    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
-    client
-        .update_live_settings(access_token, &update)
-        .map_err(|error| format!("Failed to update live setting: {}", error))?;
-
-    match load_live_setting_response("Live setting updated") {
-        Ok(response) => Ok(response),
-        Err(error) => Ok(LiveDockResponse::success(&format!(
-            "Live setting updated, but failed to refresh fields: {}",
-            error
-        ))),
-    }
+    apply_update_and_reload(
+        &settings,
+        &update,
+        "Live setting updated",
+        "Live setting updated",
+        "Failed to update live setting",
+    )
 }
 
 pub(crate) fn clear_live_tags_response() -> Result<LiveDockResponse, String> {
-    let settings = current_settings();
-    let access_token = settings.chzzk_authorization_token.trim();
-    if access_token.is_empty() {
-        return Err("CHZZK account is not linked. Run OAuth first.".to_string());
-    }
+    let settings = require_linked_settings()?;
 
     let clear_update = ChzzkLiveSettingUpdate {
         tags: Some(Vec::new()),
         ..ChzzkLiveSettingUpdate::default()
     };
 
-    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
-    client
-        .update_live_settings(access_token, &clear_update)
-        .map_err(|error| format!("Failed to clear live tags: {}", error))?;
-
-    match load_live_setting_response("Live tags cleared") {
-        Ok(response) => Ok(response),
-        Err(error) => Ok(LiveDockResponse::success(&format!(
-            "Live tags cleared, but failed to refresh fields: {}",
-            error
-        ))),
-    }
+    apply_update_and_reload(
+        &settings,
+        &clear_update,
+        "Live tags cleared",
+        "Live tags cleared",
+        "Failed to clear live tags",
+    )
 }
 
 pub(crate) fn clear_live_category_response() -> Result<LiveDockResponse, String> {
-    let settings = current_settings();
-    let access_token = settings.chzzk_authorization_token.trim();
-    if access_token.is_empty() {
-        return Err("CHZZK account is not linked. Run OAuth first.".to_string());
-    }
+    let settings = require_linked_settings()?;
 
     let clear_update = ChzzkLiveSettingUpdate {
         category_id: Some(String::new()),
         ..ChzzkLiveSettingUpdate::default()
     };
 
-    let client = ChzzkClient::new(&settings.chzzk_api_base_url);
-    client
-        .update_live_settings(access_token, &clear_update)
-        .map_err(|error| format!("Failed to clear live category: {}", error))?;
-
-    match load_live_setting_response("Live category cleared") {
-        Ok(response) => Ok(response),
-        Err(error) => Ok(LiveDockResponse::success(&format!(
-            "Live category cleared, but failed to refresh fields: {}",
-            error
-        ))),
-    }
+    apply_update_and_reload(
+        &settings,
+        &clear_update,
+        "Live category cleared",
+        "Live category cleared",
+        "Failed to clear live category",
+    )
 }
 
 unsafe fn c_input_value(value: *const c_char) -> String {
@@ -535,30 +562,14 @@ unsafe fn c_input_value(value: *const c_char) -> String {
 
 #[no_mangle]
 pub extern "C" fn obs_chzzk_live_dock_load_current_json() -> *mut c_char {
-    let response = match load_live_setting_response("Loaded current live setting") {
-        Ok(response) => response,
-        Err(error) => {
-            log_error(&error);
-            LiveDockResponse::error(error)
-        }
-    };
-
-    response_json_ptr(response)
+    response_json_from_result(load_live_setting_response("Loaded current live setting"))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn obs_chzzk_live_dock_search_category_json(
     query: *const c_char,
 ) -> *mut c_char {
-    let response = match search_category_response(&c_input_value(query)) {
-        Ok(response) => response,
-        Err(error) => {
-            log_error(&error);
-            LiveDockResponse::error(error)
-        }
-    };
-
-    response_json_ptr(response)
+    response_json_from_result(search_category_response(&c_input_value(query)))
 }
 
 #[no_mangle]
@@ -568,46 +579,22 @@ pub unsafe extern "C" fn obs_chzzk_live_dock_apply_update_json(
     category_id: *const c_char,
     tags: *const c_char,
 ) -> *mut c_char {
-    let response = match apply_live_update_response(
+    response_json_from_result(apply_live_update_response(
         &c_input_value(live_title),
         &c_input_value(category_type),
         &c_input_value(category_id),
         &c_input_value(tags),
-    ) {
-        Ok(response) => response,
-        Err(error) => {
-            log_error(&error);
-            LiveDockResponse::error(error)
-        }
-    };
-
-    response_json_ptr(response)
+    ))
 }
 
 #[no_mangle]
 pub extern "C" fn obs_chzzk_live_dock_clear_category_json() -> *mut c_char {
-    let response = match clear_live_category_response() {
-        Ok(response) => response,
-        Err(error) => {
-            log_error(&error);
-            LiveDockResponse::error(error)
-        }
-    };
-
-    response_json_ptr(response)
+    response_json_from_result(clear_live_category_response())
 }
 
 #[no_mangle]
 pub extern "C" fn obs_chzzk_live_dock_clear_tags_json() -> *mut c_char {
-    let response = match clear_live_tags_response() {
-        Ok(response) => response,
-        Err(error) => {
-            log_error(&error);
-            LiveDockResponse::error(error)
-        }
-    };
-
-    response_json_ptr(response)
+    response_json_from_result(clear_live_tags_response())
 }
 
 #[no_mangle]
@@ -800,55 +787,39 @@ unsafe extern "C" fn settings_source_destroy(data: *mut c_void) {
 unsafe extern "C" fn settings_source_defaults(settings: *mut c_void) {
     let current = current_settings();
 
-    if let Some(value) = c_string(&current.chzzk_client_id) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_CLIENT_ID), value.as_ptr());
-    }
-    if let Some(value) = c_string(&current.chzzk_client_secret) {
-        obs_data_set_default_string(
-            settings,
-            c_char_ptr(KEY_CHZZK_CLIENT_SECRET),
-            value.as_ptr(),
-        );
-    }
-    if let Some(value) = c_string(&current.chzzk_api_base_url) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_API_BASE_URL), value.as_ptr());
-    }
-    if let Some(value) = c_string(&current.discord_application_id) {
-        obs_data_set_default_string(
-            settings,
-            c_char_ptr(KEY_DISCORD_APPLICATION_ID),
-            value.as_ptr(),
-        );
-    }
+    obs_data_set_default_value(settings, KEY_CHZZK_CLIENT_ID, &current.chzzk_client_id);
+    obs_data_set_default_value(
+        settings,
+        KEY_CHZZK_CLIENT_SECRET,
+        &current.chzzk_client_secret,
+    );
+    obs_data_set_default_value(settings, KEY_CHZZK_API_BASE_URL, &current.chzzk_api_base_url);
+    obs_data_set_default_value(
+        settings,
+        KEY_DISCORD_APPLICATION_ID,
+        &current.discord_application_id,
+    );
     obs_data_set_default_bool(
         settings,
         c_char_ptr(KEY_DISCORD_PRESENCE_ENABLED),
         current.discord_presence_enabled,
     );
-    if let Some(value) = c_string(&current.discord_activity_name) {
-        obs_data_set_default_string(
-            settings,
-            c_char_ptr(KEY_DISCORD_ACTIVITY_NAME),
-            value.as_ptr(),
-        );
-    }
-    if let Some(value) = c_string(&current.chzzk_authorization_token) {
-        obs_data_set_default_string(
-            settings,
-            c_char_ptr(KEY_CHZZK_AUTHORIZATION_TOKEN),
-            value.as_ptr(),
-        );
-    }
-    if let Some(value) = c_string(&current.chzzk_auth_status) {
-        obs_data_set_default_string(settings, c_char_ptr(KEY_CHZZK_AUTH_STATUS), value.as_ptr());
-    }
-    if let Some(value) = c_string(&current.chzzk_stream_key_status) {
-        obs_data_set_default_string(
-            settings,
-            c_char_ptr(KEY_CHZZK_STREAM_KEY_STATUS),
-            value.as_ptr(),
-        );
-    }
+    obs_data_set_default_value(
+        settings,
+        KEY_DISCORD_ACTIVITY_NAME,
+        &current.discord_activity_name,
+    );
+    obs_data_set_default_value(
+        settings,
+        KEY_CHZZK_AUTHORIZATION_TOKEN,
+        &current.chzzk_authorization_token,
+    );
+    obs_data_set_default_value(settings, KEY_CHZZK_AUTH_STATUS, &current.chzzk_auth_status);
+    obs_data_set_default_value(
+        settings,
+        KEY_CHZZK_STREAM_KEY_STATUS,
+        &current.chzzk_stream_key_status,
+    );
 }
 
 unsafe extern "C" fn settings_source_properties(_data: *mut c_void) -> *mut c_void {
