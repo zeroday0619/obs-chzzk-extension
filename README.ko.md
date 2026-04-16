@@ -85,7 +85,7 @@ docker run --rm \
         1. [Chzzk Developers](https://developers.chzzk.naver.com) > `내 서비스` > `애플리케이션 등록`
         2. `애플리케이션 ID`와 `애플리케이션 이름`을 설정합니다.
         3. `Redirect URI`를 `http://127.0.0.1:20132/callback`으로 설정합니다.
-        4. `API Scope`를 `채널 정보 조회`, `채널 관리자 조회`, `채팅 메시지 조회`, `채팅 메시지 쓰기`, `채팅 공지 쓰기`, `채팅 설정 조회`, `채팅 설정 변경`, `후원 조회`, `방송 설정 조회`, `방송 설정 변경`, `활동제한 조회`, `활동제한 쓰기`, `구독 조회`, `유저 조회`로 설정합니다.
+        4. `API Scope`를 `채널 정보 조회`, `채널 관리자 조회`, `채팅 메시지 조회`, `채팅 메시지 쓰기`, `채팅 공지 쓰기`, `채팅 설정 조회`, `채팅 설정 변경`, `후원 조회`, `방송 설정 조회`, `방송 설정 변경`, `활동제한 조회`, `활동제한 쓰기`, `구독 조회`, `유저 조회`, `방송 스트림키 조회`로 설정합니다.
         5. `등록`을 클릭해 애플리케이션을 생성하고 `Client ID`와 `Client Secret`을 발급받습니다.
     - Discord Application ID 생성 방법
         1. [Discord Developer Portal](https://discord.com/developers/applications) > `New Application`

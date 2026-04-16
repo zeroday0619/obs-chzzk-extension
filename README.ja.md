@@ -85,7 +85,7 @@ docker run --rm \
         1. [Chzzk Developers](https://developers.chzzk.naver.com) > `내 서비스` > `애플리케이션 등록`
         2. `애플리케이션 ID` と `애플리케이션 이름` を設定します。
         3. `Redirect URI` を `http://127.0.0.1:20132/callback` に設定します。
-        4. `API Scope` を `채널 정보 조회`, `채널 관리자 조회`, `채팅 메시지 조회`, `채팅 메시지 쓰기`, `채팅 공지 쓰기`, `채팅 설정 조회`, `채팅 설정 변경`, `후원 조회`, `방송 설정 조회`, `방송 설정 변경`, `활동제한 조회`, `활동제한 쓰기`, `구독 조회`, `유저 조회` に設定します。
+        4. `API Scope` を `채널 정보 조회`, `채널 관리자 조회`, `채팅 메시지 조회`, `채팅 메시지 쓰기`, `채팅 공지 쓰기`, `채팅 설정 조회`, `채팅 설정 변경`, `후원 조회`, `방송 설정 조회`, `방송 설정 변경`, `활동제한 조회`, `활동제한 쓰기`, `구독 조회`, `유저 조회`, `방송 스트림키 조회` に設定します。
         5. `등록` をクリックしてアプリケーションを作成し、`Client ID` と `Client Secret` を取得します。
     - Discord Application ID の作成方法
         1. [Discord Developer Portal](https://discord.com/developers/applications) > `New Application`
