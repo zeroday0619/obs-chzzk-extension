@@ -100,6 +100,7 @@ docker run --rm \
 ### 已實作
 - Discord Rich Presence 整合
 - 編輯直播資訊（標題 / 分類 / 標籤 / 縮圖預覽 / 排序）
+- CHZZK 串流金鑰自動設定
 
 ## 貢獻
 歡迎貢獻！

@@ -100,6 +100,7 @@ docker run --rm \
 ### Implemented
 - Discord Rich Presence Integration
 - Edit Live Stream Information (Title / Category / Tags / Thumbnail Preview / Sort)
+- Automatic CHZZK Stream Key Setup
 
 ## Contributing
 Contributions are welcome!
