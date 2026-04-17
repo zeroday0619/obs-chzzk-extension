@@ -5,9 +5,25 @@ on:
     branches:
       - main
       - master
-    tags:
-      - "v*"
+    paths:
+      - src/**
+      - debian/**
+      - docker/debian-package/**
+      - scripts/**
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - Makefile
   pull_request:
+    paths:
+      - src/**
+      - debian/**
+      - docker/debian-package/**
+      - scripts/**
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - Makefile
   workflow_dispatch:
 
 permissions:
