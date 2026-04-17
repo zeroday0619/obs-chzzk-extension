@@ -1,4 +1,4 @@
-obs-chzzk-extension (0.1.0-1) unstable; urgency=medium
+obs-chzzk-extension (0.1.1-1) unstable; urgency=medium
 
   * packaging: add Debian packaging support
   * refactor: migrate live dock to CXX-Qt on Qt 6

@@ -647,7 +647,7 @@ fn current_stream_key_status() -> String {
         values
     };
 
-    stream_key_status_for_value(&stream_key, service_name == "CHZZK")
+    stream_key_status_for_value(&stream_key, service_name.eq_ignore_ascii_case("CHZZK"))
 }
 
 fn refresh_stream_key_status(settings: &mut PluginSettings) {
@@ -940,6 +940,9 @@ unsafe extern "C" fn open_settings_dialog(_private_data: *mut c_void) {
         warn("obs-chzzk-extension: settings source is not initialized");
         return;
     }
+
+    // Re-check OBS streaming service/key right before opening the UI to avoid stale status text.
+    update_settings_runtime_snapshot(current_settings());
 
     obs_frontend_open_source_properties(source);
 }
