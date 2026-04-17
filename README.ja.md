@@ -78,6 +78,30 @@ docker run --rm \
 - コンテナには、このプロジェクトの推奨バージョンと同じ Rust `1.94.1` が `rustup` でインストールされます。
 - `--artifacts-dir dist` を併用すると、コンテナ終了後もホスト側の `./dist` ディレクトリでパッケージ成果物を確認できます。
 
+## バージョン管理
+`scripts/bump-version.sh` を使うと、プロジェクトバージョンと Debian パッケージバージョンを同時に更新できます。
+
+- `Cargo.toml` の `[package] version` を更新します。
+- `debian/changelog` 先頭行のパッケージバージョンを更新します。
+- `--dry-run` でファイルを変更せずに結果を確認できます。
+
+```bash
+# patch バージョンを上げる (例: 0.1.0 -> 0.1.1, Debian: 0.1.1-1)
+scripts/bump-version.sh --bump patch
+
+# プロジェクトバージョンを明示指定 (Debian リビジョン既定値: -1)
+scripts/bump-version.sh --version 0.2.0
+
+# プロジェクトバージョン + Debian リビジョンを指定
+scripts/bump-version.sh --version 1.0.0 --debian-revision 2
+
+# Debian パッケージバージョン全体を明示指定
+scripts/bump-version.sh --version 1.0.0 --debian-version 1.0.0-3
+
+# ファイルを変更せずに結果を確認
+scripts/bump-version.sh --dry-run --bump patch
+```
+
 ## 使い方
 1. OBS Studio を起動します。
 2. `Tools` > `OBS Chzzk Extension Settings` に移動します。

@@ -78,6 +78,30 @@ docker run --rm \
 - 容器會透過 `rustup` 安裝 Rust `1.94.1`，與本專案建議使用的工具鏈一致。
 - 搭配 `--artifacts-dir dist` 使用時，容器結束後仍可在主機端的 `./dist` 目錄中看到套件產物。
 
+## 版本管理
+使用 `scripts/bump-version.sh` 可同時更新專案版本與 Debian 套件版本。
+
+- 會更新 `Cargo.toml` 的 `[package] version`。
+- 會更新 `debian/changelog` 第一行的套件版本。
+- 可透過 `--dry-run` 先預覽結果，不修改任何檔案。
+
+```bash
+# 提升 patch 版本 (例: 0.1.0 -> 0.1.1, Debian: 0.1.1-1)
+scripts/bump-version.sh --bump patch
+
+# 明確指定專案版本 (Debian 修訂版預設: -1)
+scripts/bump-version.sh --version 0.2.0
+
+# 指定專案版本 + Debian 修訂版
+scripts/bump-version.sh --version 1.0.0 --debian-revision 2
+
+# 明確指定完整 Debian 套件版本
+scripts/bump-version.sh --version 1.0.0 --debian-version 1.0.0-3
+
+# 不修改檔案，先預覽結果
+scripts/bump-version.sh --dry-run --bump patch
+```
+
 ## 使用方式
 1. 開啟 OBS Studio。
 2. 前往 `Tools` > `OBS Chzzk Extension Settings`。
